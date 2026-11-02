@@ -310,3 +310,134 @@ def correlation_pca(X, L):
     # scores, and feature scaling factors.
     return W, lam, Z, sd
 
+# Step 5 - reconstruction_curves
+def reconstruction_curves(X_train, X_test, Ls):
+    """
+    Compute training and test reconstruction errors,
+    eigenvalues, and fraction of variance explained
+    for different numbers of PCA components.
+
+    Parameters
+    ----------
+    X_train : ndarray of shape (N_train, D)
+        Training dataset.
+
+    X_test : ndarray of shape (N_test, D)
+        Test dataset.
+
+    Ls : list or array
+        Numbers of principal components to evaluate.
+
+    Returns
+    -------
+    dict
+        {
+            "train": training reconstruction errors,
+            "test": test reconstruction errors,
+            "eigvals": all covariance eigenvalues,
+            "fve": fraction of variance explained
+        }
+    """
+
+    # Convert datasets into floating-point NumPy arrays.
+    X_train = np.asarray(X_train, dtype=float)
+    X_test = np.asarray(X_test, dtype=float)
+
+    # Convert Ls into a list to support different iterable inputs.
+    Ls = list(Ls)
+
+    # Validate the component list.
+    if len(Ls) == 0:
+        raise ValueError("Ls must contain at least one component count.")
+
+    if any(not isinstance(L, (int, np.integer)) for L in Ls):
+        raise ValueError("All values in Ls must be integers.")
+
+    if any(L < 0 for L in Ls):
+        raise ValueError("Component counts cannot be negative.")
+
+    # Ensure training and test datasets have the same number of features.
+    if X_train.ndim != 2 or X_test.ndim != 2:
+        raise ValueError("X_train and X_test must be 2D arrays.")
+
+    if X_train.shape[1] != X_test.shape[1]:
+        raise ValueError("Training and test datasets must have the same number of features.")
+
+    # Determine the maximum number of components requested.
+    max_L = max(Ls)
+
+    # Fit PCA exactly once on the training dataset.
+    # The training mean and principal component basis
+    # will also be used for reconstructing the test dataset.
+    mu, W_max, lam, _ = pca_svd(X_train, max_L)
+
+    # Initialize lists for the reconstruction errors.
+    train_errors = []
+    test_errors = []
+    fve = []
+
+    # Calculate the total variance from all eigenvalues.
+    total_variance = np.sum(lam)
+
+    # Evaluate each requested number of principal components.
+    for L in Ls:
+
+        # Select the first L principal component directions.
+        W = W_max[:, :L]
+
+        # -----------------------------
+        # Training reconstruction error
+        # -----------------------------
+
+        # Project training data onto the first L components.
+        Z_train = (X_train - mu) @ W
+
+        # Reconstruct the training data.
+        X_train_reconstructed = Z_train @ W.T + mu
+
+        # Calculate mean squared reconstruction error.
+        # Sum squared errors across features, then average
+        # across all training observations.
+        train_error = np.mean(
+            np.sum((X_train - X_train_reconstructed) ** 2, axis=1)
+        )
+
+        train_errors.append(train_error)
+
+        # -----------------------------
+        # Test reconstruction error
+        # -----------------------------
+
+        # Project test data using the training mean and basis.
+        Z_test = (X_test - mu) @ W
+
+        # Reconstruct the test data.
+        X_test_reconstructed = Z_test @ W.T + mu
+
+        # Calculate mean squared test reconstruction error.
+        test_error = np.mean(
+            np.sum((X_test - X_test_reconstructed) ** 2, axis=1)
+        )
+
+        test_errors.append(test_error)
+
+        # -----------------------------
+        # Fraction of variance explained
+        # -----------------------------
+
+        # Calculate cumulative fraction of variance explained.
+        if total_variance > 0:
+            explained_variance = np.sum(lam[:L]) / total_variance
+        else:
+            explained_variance = 0.0
+
+        fve.append(explained_variance)
+
+    # Return all requested results.
+    return {
+        "train": np.array(train_errors),
+        "test": np.array(test_errors),
+        "eigvals": lam,
+        "fve": np.array(fve)
+    }
+
