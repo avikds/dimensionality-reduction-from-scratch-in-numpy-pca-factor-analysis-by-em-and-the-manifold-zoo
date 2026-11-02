@@ -1228,3 +1228,94 @@ def fit_fa(X, L, n_iter=100, seed=0):
     # Return fitted parameters and likelihood history.
     return W, mu, psi, trace
 
+# Step 14 - varimax
+def varimax(W, n_iter=100, tol=1e-8):
+    """
+    Perform orthogonal Varimax rotation of a factor loading matrix.
+
+    Parameters
+    ----------
+    W : ndarray of shape (D, L)
+        Original factor loading matrix.
+
+    n_iter : int, default=100
+        Maximum number of SVD iterations.
+
+    tol : float, default=1e-8
+        Relative tolerance for convergence.
+
+    Returns
+    -------
+    W_rot : ndarray of shape (D, L)
+        Rotated factor loading matrix.
+
+    R : ndarray of shape (L, L)
+        Orthogonal rotation matrix.
+    """
+
+    # Convert the loading matrix into a floating-point NumPy array.
+    W = np.asarray(W, dtype=float)
+
+    # Validate the input.
+    if W.ndim != 2:
+        raise ValueError("W must be a two-dimensional array.")
+
+    if not isinstance(n_iter, (int, np.integer)) or n_iter < 0:
+        raise ValueError("n_iter must be a non-negative integer.")
+
+    if not np.isscalar(tol) or not np.isfinite(tol) or tol < 0:
+        raise ValueError("tol must be a non-negative finite scalar.")
+
+    # Get the number of features and factors.
+    D, L = W.shape
+
+    # Initialize the orthogonal rotation matrix.
+    R = np.eye(L)
+
+    # Handle an empty factor dimension.
+    if L == 0:
+        return W.copy(), R
+
+    # Initialize the previous objective value.
+    obj = 0.0
+
+    # Perform the iterative Varimax optimization.
+    for _ in range(n_iter):
+
+        # Apply the current orthogonal rotation.
+        A = W @ R
+
+        # Calculate the matrix used in the SVD update.
+        #
+        # G = W.T @ (
+        #     A**3 - A * sum(A**2, axis=0) / D
+        # )
+        G = W.T @ (
+            A**3
+            - A * np.sum(A**2, axis=0) / D
+        )
+
+        # Compute the singular value decomposition of G.
+        U, s, Vt = np.linalg.svd(G)
+
+        # Update the orthogonal rotation matrix.
+        # This maximizes the Varimax objective at each iteration.
+        R_new = U @ Vt
+
+        # Calculate the new objective value.
+        new_obj = float(np.sum(s))
+
+        # Check for convergence.
+        if new_obj < obj * (1.0 + tol):
+            break
+
+        # Accept the updated rotation and objective.
+        R = R_new
+        obj = new_obj
+
+    # Apply the final orthogonal rotation to the loadings.
+    W_rot = W @ R
+
+    # Return rotated loadings and the rotation matrix.
+    return W_rot, R
+

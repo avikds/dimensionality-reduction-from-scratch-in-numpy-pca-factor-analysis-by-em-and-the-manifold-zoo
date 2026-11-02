@@ -23,6 +23,7 @@ python scaffold.py
 - [x] **11.** fa_e_step
 - [x] **12.** fa_m_step
 - [x] **13.** fit_fa
+- [x] **14.** varimax
 
 ---
 
