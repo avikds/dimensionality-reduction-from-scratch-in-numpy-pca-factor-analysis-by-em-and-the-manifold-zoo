@@ -1032,3 +1032,199 @@ def fa_m_step(X, m, Sigma, psi_min=1e-6):
     # Return the updated factor loadings, mean, and noise variances.
     return W, mu, psi
 
+# Step 13 - fit_fa
+def fa_loglik(X, W, mu, psi):
+    """
+    Compute the mean per-example log-likelihood under
+    the Factor Analysis Gaussian model.
+
+    The covariance matrix is:
+        C = W @ W.T + diag(psi)
+
+    Uses the Woodbury identity and matrix determinant lemma
+    to avoid constructing or inverting a D x D matrix.
+
+    Parameters
+    ----------
+    X : ndarray of shape (N, D)
+        Input observations.
+
+    W : ndarray of shape (D, L)
+        Factor loading matrix.
+
+    mu : ndarray of shape (D,)
+        Mean vector.
+
+    psi : ndarray of shape (D,)
+        Diagonal noise variances.
+
+    Returns
+    -------
+    float
+        Mean log-likelihood per observation.
+    """
+
+    # Convert inputs into floating-point NumPy arrays.
+    X = np.asarray(X, dtype=float)
+    W = np.asarray(W, dtype=float)
+    mu = np.asarray(mu, dtype=float)
+    psi = np.asarray(psi, dtype=float)
+
+    # Get the number of observations, features, and latent factors.
+    N, D = X.shape
+    L = W.shape[1]
+
+    # Validate dimensions.
+    if W.shape[0] != D or mu.shape != (D,) or psi.shape != (D,):
+        raise ValueError("Incompatible dimensions between X, W, mu, and psi.")
+
+    if np.any(psi <= 0) or not np.all(np.isfinite(psi)):
+        raise ValueError("All entries of psi must be positive and finite.")
+
+    # Center the observations.
+    Xc = X - mu
+
+    # Compute Psi^(-1) @ W efficiently.
+    # Psi is diagonal, so divide each row by its corresponding variance.
+    weighted_W = W / psi[:, np.newaxis]
+
+    # Construct the smaller L x L matrix:
+    # A = I + W.T @ Psi^(-1) @ W
+    A = np.eye(L) + W.T @ weighted_W
+
+    # Compute the log determinant of A.
+    sign, logdet_A = np.linalg.slogdet(A)
+
+    if sign <= 0:
+        raise np.linalg.LinAlgError("Matrix A must have a positive determinant.")
+
+    # Apply the matrix determinant lemma:
+    # log|C| = sum(log(psi)) + log|A|
+    logdet_C = np.sum(np.log(psi)) + logdet_A
+
+    # First part of the Mahalanobis distance:
+    # x_c.T @ Psi^(-1) @ x_c
+    term1 = np.sum((Xc ** 2) / psi, axis=1)
+
+    # Project centered observations into the weighted latent space:
+    # T = Xc @ Psi^(-1) @ W
+    T = Xc @ weighted_W
+
+    if L > 0:
+        # Solve A @ B = T.T instead of explicitly computing A^(-1).
+        B = np.linalg.solve(A, T.T).T
+
+        # Second part of the Mahalanobis distance:
+        # T @ A^(-1) @ T.T
+        term2 = np.sum(T * B, axis=1)
+    else:
+        term2 = np.zeros(N, dtype=float)
+
+    # Complete Mahalanobis distance using the Woodbury identity.
+    mahalanobis = term1 - term2
+
+    # Gaussian log-density for each observation.
+    logpdf = -0.5 * (
+        D * np.log(2.0 * np.pi)
+        + logdet_C
+        + mahalanobis
+    )
+
+    # Return the mean log-likelihood as a Python float.
+    return float(np.mean(logpdf))
+
+
+def fit_fa(X, L, n_iter=100, seed=0):
+    """
+    Fit a Factor Analysis model using the EM algorithm.
+
+    Parameters
+    ----------
+    X : ndarray of shape (N, D)
+        Input observations.
+
+    L : int
+        Number of latent factors.
+
+    n_iter : int, default=100
+        Number of EM iterations.
+
+    seed : int, default=0
+        Random seed for reproducible initialization.
+
+    Returns
+    -------
+    W : ndarray of shape (D, L)
+        Estimated factor loading matrix.
+
+    mu : ndarray of shape (D,)
+        Estimated mean vector.
+
+    psi : ndarray of shape (D,)
+        Estimated diagonal noise variances.
+
+    trace : ndarray of shape (n_iter,)
+        Mean log-likelihood after each EM iteration.
+    """
+
+    # Convert input into a floating-point NumPy array.
+    X = np.asarray(X, dtype=float)
+
+    # Get the number of observations and features.
+    N, D = X.shape
+
+    # Validate the number of latent factors and iterations.
+    if not isinstance(L, (int, np.integer)) or not 0 <= L <= D:
+        raise ValueError("L must be an integer between 0 and D.")
+
+    if not isinstance(n_iter, (int, np.integer)) or n_iter < 0:
+        raise ValueError("n_iter must be a non-negative integer.")
+
+    if N == 0:
+        raise ValueError("X must contain at least one observation.")
+
+    # Initialize the random number generator.
+    rng = np.random.default_rng(seed)
+
+    # Initialize the mean vector using the sample mean.
+    mu = np.mean(X, axis=0)
+
+    # Initialize feature-specific noise variances.
+    # Apply a minimum variance floor of 1e-6.
+    psi = np.maximum(np.var(X, axis=0), 1e-6)
+
+    # Initialize the factor loading matrix with random values.
+    W = (
+        rng.standard_normal((D, L))
+        * np.sqrt(psi.mean())
+    )
+
+    # Allocate the likelihood convergence trace.
+    trace = np.empty(n_iter, dtype=float)
+
+    # Run the EM algorithm.
+    for iteration in range(n_iter):
+
+        # --------------------------------
+        # E-step: Estimate latent factors
+        # --------------------------------
+        m, Sigma = fa_e_step(X, W, mu, psi)
+
+        # --------------------------------
+        # M-step: Update model parameters
+        # --------------------------------
+        W, mu, psi = fa_m_step(
+            X,
+            m,
+            Sigma,
+            psi_min=1e-6
+        )
+
+        # --------------------------------
+        # Evaluate the updated model
+        # --------------------------------
+        trace[iteration] = fa_loglik(X, W, mu, psi)
+
+    # Return fitted parameters and likelihood history.
+    return W, mu, psi, trace
+
