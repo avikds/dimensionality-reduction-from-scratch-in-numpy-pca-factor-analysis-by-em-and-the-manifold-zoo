@@ -26,6 +26,7 @@ python scaffold.py
 - [x] **14.** varimax
 - [x] **15.** sensor_noise_experiment
 - [x] **16.** em_pca
+- [x] **17.** mppca_e_step
 
 ---
 

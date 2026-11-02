@@ -1580,3 +1580,120 @@ def em_pca(X, L, n_iter=50, seed=0):
     # eigenvalues, and reconstruction error history.
     return mu, W, lam, np.asarray(errs)
 
+# Step 17 - mppca_e_step
+def mppca_e_step(X, pi, mus, Ws, sigma2s):
+    """
+    Perform the E-step for a mixture of Probabilistic PCA models.
+
+    Parameters
+    ----------
+    X : ndarray of shape (N, D)
+        Input observations.
+
+    pi : ndarray of shape (K,)
+        Mixture weights.
+
+    mus : ndarray of shape (K, D)
+        Mean vectors of the mixture components.
+
+    Ws : ndarray of shape (K, D, L)
+        Loading matrices of the mixture components.
+
+    sigma2s : ndarray of shape (K,)
+        Isotropic noise variances of the mixture components.
+
+    Returns
+    -------
+    resp : ndarray of shape (N, K)
+        Responsibilities, where each row sums to one.
+
+    ll : float
+        Mean log-likelihood per observation.
+    """
+
+    # Convert inputs into floating-point NumPy arrays.
+    X = np.asarray(X, dtype=float)
+    pi = np.asarray(pi, dtype=float)
+    mus = np.asarray(mus, dtype=float)
+    Ws = np.asarray(Ws, dtype=float)
+    sigma2s = np.asarray(sigma2s, dtype=float)
+
+    # Get the number of observations and features.
+    N, D = X.shape
+
+    # Get the number of mixture components.
+    K = len(pi)
+
+    # Validate input dimensions.
+    if pi.ndim != 1:
+        raise ValueError("pi must be a one-dimensional array.")
+
+    if mus.shape != (K, D):
+        raise ValueError("mus must have shape (K, D).")
+
+    if Ws.ndim != 3 or Ws.shape[:2] != (K, D):
+        raise ValueError("Ws must have shape (K, D, L).")
+
+    if sigma2s.shape != (K,):
+        raise ValueError("sigma2s must have shape (K,).")
+
+    if np.any(pi < 0) or not np.all(np.isfinite(pi)):
+        raise ValueError("Mixture weights must be non-negative and finite.")
+
+    if np.sum(pi) <= 0:
+        raise ValueError("At least one mixture weight must be positive.")
+
+    if np.any(sigma2s <= 0) or not np.all(np.isfinite(sigma2s)):
+        raise ValueError("All noise variances must be positive and finite.")
+
+    # Initialize the matrix of log joint probabilities.
+    # Each entry represents:
+    # log pi_k + log N(x_n | mu_k, W_k W_k.T + sigma2_k I).
+    log_joint = np.empty((N, K), dtype=float)
+
+    # Calculate the log joint probability for each component.
+    for k in range(K):
+
+        # Handle zero mixture weights without taking log(0).
+        if pi[k] == 0:
+            log_joint[:, k] = -np.inf
+            continue
+
+        # Compute the component's log-density using PPCA.
+        component_logpdf = ppca_logpdf(
+            X,
+            mus[k],
+            Ws[k],
+            sigma2s[k]
+        )
+
+        # Add the logarithm of the mixture weight.
+        log_joint[:, k] = np.log(pi[k]) + component_logpdf
+
+    # -----------------------------------------
+    # Stable log-sum-exp normalization
+    # -----------------------------------------
+
+    # Find the maximum log joint probability for each observation.
+    # Keeping dimensions allows broadcasting.
+    max_log = np.max(log_joint, axis=1, keepdims=True)
+
+    # Compute the log normalization constant.
+    log_norm = max_log + np.log(
+        np.sum(
+            np.exp(log_joint - max_log),
+            axis=1,
+            keepdims=True
+        )
+    )
+
+    # Calculate normalized responsibilities.
+    # Every row of resp sums to one.
+    resp = np.exp(log_joint - log_norm)
+
+    # Calculate the mean log-likelihood per observation.
+    ll = float(np.mean(log_norm))
+
+    # Return responsibilities and mean log-likelihood.
+    return resp, ll
+
