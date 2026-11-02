@@ -261,3 +261,52 @@ def pca_svd(X, L):
     # covariance eigenvalues, and principal component scores.
     return mu, W, lam, Z
 
+# Step 4 - correlation_pca
+def correlation_pca(X, L):
+    """
+    Perform PCA on standardized data using the SVD-based PCA function.
+
+    Parameters
+    ----------
+    X : ndarray of shape (N, D)
+        Input data, with one example per row.
+    L : int
+        Number of principal components to retain.
+
+    Returns
+    -------
+    W : ndarray of shape (D, L)
+        Principal component directions of standardized data.
+
+    lam : ndarray of shape (min(N, D),)
+        Covariance eigenvalues of standardized data.
+
+    Z : ndarray of shape (N, L)
+        Principal component scores.
+
+    sd : ndarray of shape (D,)
+        Population standard deviations used for scaling.
+    """
+
+    # Convert input into a floating-point NumPy array.
+    X = np.asarray(X, dtype=float)
+
+    # Compute the population standard deviation of each feature.
+    # ddof=0 is the default, as required by the instructions.
+    sd = np.std(X, axis=0)
+
+    # Avoid division by zero for constant features.
+    # Use 1.0 as the divisor for columns with zero variance.
+    sd[sd == 0] = 1.0
+
+    # Scale each feature by its standard deviation.
+    # pca_svd() will center the scaled data internally.
+    X_scaled = X / sd
+
+    # Perform PCA using the existing SVD-based implementation.
+    mu, W, lam, Z = pca_svd(X_scaled, L)
+
+    # Return the principal components, eigenvalues,
+    # scores, and feature scaling factors.
+    return W, lam, Z, sd
+

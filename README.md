@@ -13,6 +13,7 @@ python scaffold.py
 - [x] **1.** pca_eig
 - [x] **2.** pca_gram
 - [x] **3.** pca_svd
+- [x] **4.** correlation_pca
 
 ---
 
