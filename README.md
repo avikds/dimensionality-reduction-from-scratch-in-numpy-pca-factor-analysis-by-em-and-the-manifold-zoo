@@ -18,6 +18,7 @@ python scaffold.py
 - [x] **6.** profile_log_likelihood
 - [x] **7.** ppca_fit
 - [x] **8.** ppca_logpdf
+- [x] **9.** ppca_posterior
 
 ---
 

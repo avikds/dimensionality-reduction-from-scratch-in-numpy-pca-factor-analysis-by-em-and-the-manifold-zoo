@@ -666,3 +666,84 @@ def ppca_logpdf(X, mu, W, sigma2):
     # Return one log-density value per observation.
     return logpdf
 
+# Step 9 - ppca_posterior
+def ppca_posterior(X, mu, W, sigma2):
+    """
+    Compute the posterior distribution of latent variables
+    given observations under the PPCA model.
+
+    Parameters
+    ----------
+    X : ndarray of shape (N, D)
+        Input observations, with one observation per row.
+
+    mu : ndarray of shape (D,)
+        Mean vector of the PPCA model.
+
+    W : ndarray of shape (D, L)
+        PPCA loading matrix.
+
+    sigma2 : float
+        Positive isotropic noise variance.
+
+    Returns
+    -------
+    means : ndarray of shape (N, L)
+        Posterior mean of the latent variables for each observation.
+
+    cov : ndarray of shape (L, L)
+        Shared posterior covariance matrix of the latent variables.
+    """
+
+    # Convert inputs into floating-point NumPy arrays.
+    X = np.asarray(X, dtype=float)
+    mu = np.asarray(mu, dtype=float)
+    W = np.asarray(W, dtype=float)
+
+    # Get the number of observations and latent dimensions.
+    N, D = X.shape
+    L = W.shape[1]
+
+    # Validate input dimensions.
+    if X.ndim != 2 or W.ndim != 2:
+        raise ValueError("X and W must be two-dimensional arrays.")
+
+    if mu.shape != (D,) or W.shape[0] != D:
+        raise ValueError("Incompatible dimensions between X, mu, and W.")
+
+    # Validate the noise variance.
+    if not np.isscalar(sigma2) or not np.isfinite(sigma2) or sigma2 <= 0:
+        raise ValueError("sigma2 must be a positive finite scalar.")
+
+    sigma2 = float(sigma2)
+
+    # Center the observations.
+    Xc = X - mu
+
+    # Construct the L x L matrix:
+    # M = W.T @ W + sigma2 * I
+    M = W.T @ W + sigma2 * np.eye(L)
+
+    # Calculate the posterior covariance:
+    # cov = sigma2 * M^(-1)
+    #
+    # Solve a linear system instead of explicitly computing
+    # the matrix inverse.
+    if L > 0:
+        cov = sigma2 * np.linalg.solve(M, np.eye(L))
+
+        # Calculate W.T @ (X - mu) for all observations.
+        projected = Xc @ W
+
+        # Calculate the posterior means:
+        # means = M^(-1) @ W.T @ (X - mu)
+        means = np.linalg.solve(M, projected.T).T
+
+    else:
+        # Handle the case of zero latent dimensions.
+        means = np.empty((N, 0), dtype=float)
+        cov = np.empty((0, 0), dtype=float)
+
+    # Return posterior means and shared posterior covariance.
+    return means, cov
+
