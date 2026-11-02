@@ -1319,3 +1319,138 @@ def varimax(W, n_iter=100, tol=1e-8):
     # Return rotated loadings and the rotation matrix.
     return W_rot, R
 
+# Step 15 - sensor_noise_experiment
+def principal_angle(A, B):
+    """
+    Calculate the largest principal angle between
+    the column spaces of two matrices.
+
+    Parameters
+    ----------
+    A : ndarray
+        First basis matrix.
+
+    B : ndarray
+        Second basis matrix.
+
+    Returns
+    -------
+    float
+        Largest principal angle in degrees.
+    """
+
+    # Obtain orthonormal bases using QR decomposition.
+    Qa, _ = np.linalg.qr(np.asarray(A, dtype=float))
+    Qb, _ = np.linalg.qr(np.asarray(B, dtype=float))
+
+    # Compute singular values of the cross-product.
+    c = np.linalg.svd(Qa.T @ Qb, compute_uv=False)
+
+    # The smallest singular value gives the largest
+    # principal angle.
+    return float(
+        np.degrees(
+            np.arccos(np.clip(c.min(), -1.0, 1.0))
+        )
+    )
+
+
+def sensor_noise_experiment(n=2000, noise_var=25.0, seed=0):
+    """
+    Compare PPCA and Factor Analysis on data containing
+    one particularly noisy sensor.
+
+    Parameters
+    ----------
+    n : int
+        Number of training and test observations.
+
+    noise_var : float
+        Noise variance of the faulty sensor (dimension 0).
+
+    seed : int
+        Random seed for reproducibility.
+
+    Returns
+    -------
+    dict
+        Experiment results containing six Python floats.
+    """
+
+    # Initialize the random number generator.
+    rng = np.random.default_rng(seed)
+
+    # Define the number of observed dimensions and latent factors.
+    D = 10
+    L = 2
+
+    # Generate the true factor loading matrix.
+    W_true = rng.standard_normal((D, L))
+
+    # Define the true feature-specific noise variances.
+    psi_true = np.full(D, 0.1)
+
+    # Assign higher noise variance to sensor 0.
+    psi_true[0] = noise_var
+
+    # Generate the training dataset.
+    X_train = (
+        rng.standard_normal((n, L)) @ W_true.T
+        + rng.standard_normal((n, D)) * np.sqrt(psi_true)
+    )
+
+    # Generate the test dataset using the same true model.
+    X_test = (
+        rng.standard_normal((n, L)) @ W_true.T
+        + rng.standard_normal((n, D)) * np.sqrt(psi_true)
+    )
+
+    # Fit Probabilistic PCA on the training dataset.
+    mu_ppca, W_ppca, sigma2 = ppca_fit(X_train, L)
+
+    # Fit Factor Analysis using 200 EM iterations.
+    W_fa, mu_fa, psi_fa, trace = fit_fa(
+        X_train,
+        L,
+        n_iter=200,
+        seed=seed
+    )
+
+    # Calculate the largest principal angle for PPCA.
+    ppca_angle = principal_angle(W_ppca, W_true)
+
+    # Calculate the largest principal angle for Factor Analysis.
+    fa_angle = principal_angle(W_fa, W_true)
+
+    # Evaluate PPCA mean log-likelihood on the test dataset.
+    ppca_test = float(
+        np.mean(
+            ppca_logpdf(
+                X_test,
+                mu_ppca,
+                W_ppca,
+                sigma2
+            )
+        )
+    )
+
+    # Evaluate Factor Analysis mean log-likelihood on the test dataset.
+    fa_test = float(
+        fa_loglik(
+            X_test,
+            W_fa,
+            mu_fa,
+            psi_fa
+        )
+    )
+
+    # Return the experiment results.
+    return {
+        "ppca_angle": float(ppca_angle),
+        "fa_angle": float(fa_angle),
+        "ppca_test": float(ppca_test),
+        "fa_test": float(fa_test),
+        "psi_noisy": float(psi_fa[0]),
+        "sigma2": float(sigma2)
+    }
+
