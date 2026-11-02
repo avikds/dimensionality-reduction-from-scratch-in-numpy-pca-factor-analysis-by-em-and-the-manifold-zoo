@@ -911,3 +911,124 @@ def fa_e_step(X, W, mu, psi):
     # Return posterior means and shared posterior covariance.
     return m, Sigma
 
+# Step 12 - fa_m_step
+def fa_m_step(X, m, Sigma, psi_min=1e-6):
+    """
+    Perform the M-step of the EM algorithm for Factor Analysis.
+
+    Parameters
+    ----------
+    X : ndarray of shape (N, D)
+        Input observations, with one observation per row.
+
+    m : ndarray of shape (N, L)
+        Posterior means of the latent factors from the E-step.
+
+    Sigma : ndarray of shape (L, L)
+        Shared posterior covariance matrix from the E-step.
+
+    psi_min : float, default=1e-6
+        Minimum allowed value for each noise variance.
+
+    Returns
+    -------
+    W : ndarray of shape (D, L)
+        Updated factor loading matrix.
+
+    mu : ndarray of shape (D,)
+        Updated mean vector.
+
+    psi : ndarray of shape (D,)
+        Updated diagonal noise variances.
+    """
+
+    # Convert inputs into floating-point NumPy arrays.
+    X = np.asarray(X, dtype=float)
+    m = np.asarray(m, dtype=float)
+    Sigma = np.asarray(Sigma, dtype=float)
+
+    # Get the number of observations, features, and latent factors.
+    N, D = X.shape
+    L = m.shape[1]
+
+    # Validate input dimensions.
+    if X.ndim != 2 or m.ndim != 2 or Sigma.ndim != 2:
+        raise ValueError("X, m, and Sigma must be two-dimensional arrays.")
+
+    if N == 0:
+        raise ValueError("X must contain at least one observation.")
+
+    if m.shape[0] != N:
+        raise ValueError("m must have the same number of rows as X.")
+
+    if Sigma.shape != (L, L):
+        raise ValueError("Sigma must have shape (L, L).")
+
+    if not np.isscalar(psi_min) or not np.isfinite(psi_min) or psi_min <= 0:
+        raise ValueError("psi_min must be a positive finite scalar.")
+
+    # Construct b_i = (m_i, 1) for every observation.
+    # B has shape (N, L + 1).
+    B = np.column_stack((m, np.ones(N)))
+
+    # Calculate the sum of the augmented second-moment matrices:
+    #
+    # C_i = [[Sigma + m_i m_i.T, m_i],
+    #        [m_i.T,             1  ]]
+    #
+    # The sum of the top-left blocks is:
+    # N * Sigma + m.T @ m.
+
+    C_sum = np.zeros((L + 1, L + 1), dtype=float)
+
+    # Top-left block.
+    C_sum[:L, :L] = N * Sigma + m.T @ m
+
+    # Top-right block.
+    C_sum[:L, L] = np.sum(m, axis=0)
+
+    # Bottom-left block.
+    C_sum[L, :L] = np.sum(m, axis=0)
+
+    # Bottom-right block.
+    C_sum[L, L] = N
+
+    # Compute the sum of x_i @ b_i.T:
+    # Shape = (D, L + 1).
+    A = X.T @ B
+
+    # Estimate the augmented loading matrix:
+    #
+    # W_tilde = [sum(x_i b_i.T)] @ [sum(C_i)]^(-1)
+    #
+    # Solve the transposed system instead of explicitly
+    # computing the matrix inverse.
+    W_tilde = np.linalg.solve(C_sum.T, A.T).T
+
+    # Extract the updated factor loading matrix.
+    W = W_tilde[:, :L]
+
+    # Extract the updated mean vector (intercept column).
+    mu = W_tilde[:, L]
+
+    # Calculate the fitted conditional means:
+    # W_tilde @ b_i
+    # Shape = (N, D) after transposing the parameter matrix.
+    X_fitted = B @ W_tilde.T
+
+    # Estimate the diagonal noise covariance:
+    #
+    # psi = (1/N) * diag(sum(
+    #     (x_i - W_tilde @ b_i) @ x_i.T
+    # ))
+    #
+    # Element-wise multiplication computes the diagonal
+    # without constructing a full D x D matrix.
+    psi = np.mean((X - X_fitted) * X, axis=0)
+
+    # Apply the minimum variance floor.
+    psi = np.maximum(psi, psi_min)
+
+    # Return the updated factor loadings, mean, and noise variances.
+    return W, mu, psi
+
