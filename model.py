@@ -441,3 +441,74 @@ def reconstruction_curves(X_train, X_test, Ls):
         "fve": np.array(fve)
     }
 
+# Step 6 - profile_log_likelihood
+def profile_log_likelihood(eigvals):
+    """
+    Compute the profile log-likelihood for every possible
+    change point in a sorted sequence of eigenvalues.
+
+    Parameters
+    ----------
+    eigvals : ndarray of shape (Lmax,)
+        Eigenvalues in decreasing order.
+
+    Returns
+    -------
+    ell : ndarray of shape (Lmax - 1,)
+        Profile log-likelihood scores for each possible split.
+        Entry i corresponds to a split after eigenvalue i + 1.
+    """
+
+    # Convert eigenvalues into a one-dimensional float array.
+    eigvals = np.asarray(eigvals, dtype=float).ravel()
+
+    # Number of eigenvalues.
+    Lmax = len(eigvals)
+
+    # At least two eigenvalues are required for a valid split.
+    if Lmax < 2:
+        return np.empty(0, dtype=float)
+
+    # Store the log-likelihood score for each possible split.
+    ell = np.empty(Lmax - 1, dtype=float)
+
+    # Evaluate every possible change point.
+    for L in range(1, Lmax):
+
+        # Divide eigenvalues into two groups.
+        group1 = eigvals[:L]
+        group2 = eigvals[L:]
+
+        # Compute the mean of each group.
+        mu1 = np.mean(group1)
+        mu2 = np.mean(group2)
+
+        # Compute the within-group squared deviations.
+        ss1 = np.sum((group1 - mu1) ** 2)
+        ss2 = np.sum((group2 - mu2) ** 2)
+
+        # Compute the pooled variance.
+        # Divide by Lmax, as specified in the instructions.
+        sigma2 = (ss1 + ss2) / Lmax
+
+        # Prevent division by zero for a perfect two-level curve.
+        sigma2 = max(sigma2, 1e-12)
+
+        # Compute the Gaussian log-likelihood for both groups.
+        # Both groups share the same pooled variance.
+        ll1 = -0.5 * (
+            len(group1) * np.log(2.0 * np.pi * sigma2)
+            + ss1 / sigma2
+        )
+
+        ll2 = -0.5 * (
+            len(group2) * np.log(2.0 * np.pi * sigma2)
+            + ss2 / sigma2
+        )
+
+        # Store the total log-likelihood for this split.
+        ell[L - 1] = ll1 + ll2
+
+    # Return all profile log-likelihood scores.
+    return ell
+
