@@ -2352,3 +2352,94 @@ def knn_accuracy(Z, y, k=5):
 
     return float(accuracy)
 
+# Step 22 - knn_geodesics
+def knn_geodesics(D2, k):
+    """
+    Compute approximate geodesic distances using a symmetric
+    k-nearest-neighbour graph and all-pairs shortest paths.
+
+    Parameters
+    ----------
+    D2 : ndarray of shape (N, N)
+        Squared Euclidean distance matrix.
+
+    k : int
+        Number of nearest neighbours for graph construction.
+
+    Returns
+    -------
+    G : ndarray of shape (N, N)
+        Geodesic distance matrix.
+
+        - Zero on the diagonal.
+        - Shortest-path distance for connected points.
+        - np.inf for disconnected points.
+    """
+
+    # Convert the squared distance matrix into a float array.
+    D2 = np.asarray(D2, dtype=float)
+
+    # Get the number of observations.
+    N = D2.shape[0]
+
+    # Validate the distance matrix.
+    if D2.ndim != 2 or D2.shape != (N, N):
+        raise ValueError("D2 must be a square matrix.")
+
+    if not isinstance(k, (int, np.integer)) or not 1 <= k < N:
+        raise ValueError("k must be an integer between 1 and N - 1.")
+
+    # -------------------------------------------------
+    # 1. Construct the symmetric k-nearest-neighbour graph
+    # -------------------------------------------------
+
+    # Find the k nearest neighbours of every observation.
+    neighbors = knn_indices(D2, k)
+
+    # Initialize the graph with infinite distances.
+    # Infinite distance means that no direct edge exists.
+    G = np.full((N, N), np.inf, dtype=float)
+
+    # Set the diagonal to zero.
+    np.fill_diagonal(G, 0.0)
+
+    # Generate the row indices corresponding to neighbours.
+    rows = np.repeat(np.arange(N), k)
+
+    # Flatten the neighbour indices.
+    cols = neighbors.ravel()
+
+    # Convert squared Euclidean distances into Euclidean distances.
+    edge_lengths = np.sqrt(
+        np.maximum(D2[rows, cols], 0.0)
+    )
+
+    # Add directed nearest-neighbour edges.
+    G[rows, cols] = edge_lengths
+
+    # Make the graph symmetric.
+    # An undirected edge exists if either endpoint selects the other.
+    G[cols, rows] = edge_lengths
+
+    # -------------------------------------------------
+    # 2. Calculate all-pairs shortest paths
+    # -------------------------------------------------
+
+    # Use the vectorized Floyd-Warshall algorithm.
+    #
+    # For every intermediate point m:
+    # G[i, j] = min(G[i, j], G[i, m] + G[m, j])
+    #
+    # This naturally preserves np.inf between disconnected
+    # components.
+    for m in range(N):
+        G = np.minimum(
+            G,
+            G[:, m:m+1] + G[m:m+1, :]
+        )
+
+    # Ensure the diagonal remains exactly zero.
+    np.fill_diagonal(G, 0.0)
+
+    return G
+

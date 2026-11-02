@@ -31,6 +31,7 @@ python scaffold.py
 - [x] **19.** swiss_roll
 - [x] **20.** classical_mds
 - [x] **21.** trustworthiness
+- [x] **22.** knn_geodesics
 
 ---
 
