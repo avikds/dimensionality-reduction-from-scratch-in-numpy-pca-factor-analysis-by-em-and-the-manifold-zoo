@@ -3342,3 +3342,162 @@ def conditional_p(D2, perplexity=30.0, tol=1e-5, max_iter=50):
 
     return P, sigmas
 
+# Step 28 - tsne_kl_grad
+def tsne_kl_grad(P, Z, kernel="t"):
+    """
+    Compute the symmetric SNE / t-SNE KL-divergence
+    objective and its gradient.
+
+    Parameters
+    ----------
+    P : ndarray of shape (N, N)
+        Symmetric joint probability distribution in the
+        original high-dimensional space.
+
+    Z : ndarray of shape (N, 2)
+        Low-dimensional embedding.
+
+    kernel : str, default="t"
+        Kernel used in the embedding space:
+        "t"    : Student-t kernel.
+        "gauss": Gaussian kernel.
+
+    Returns
+    -------
+    kl : float
+        KL-divergence objective.
+
+    grad : ndarray of shape (N, 2)
+        Gradient of the KL-divergence with respect to Z.
+    """
+
+    # Convert inputs into floating-point NumPy arrays.
+    P = np.asarray(P, dtype=float)
+    Z = np.asarray(Z, dtype=float)
+
+    # Get the number of observations.
+    N = Z.shape[0]
+
+    # Validate input dimensions.
+    if Z.ndim != 2 or Z.shape[1] != 2:
+        raise ValueError("Z must have shape (N, 2).")
+
+    if P.shape != (N, N):
+        raise ValueError("P must have shape (N, N).")
+
+    if not np.all(np.isfinite(P)) or np.any(P < 0):
+        raise ValueError("P must contain finite, non-negative probabilities.")
+
+    if kernel not in ("t", "gauss"):
+        raise ValueError("kernel must be either 't' or 'gauss'.")
+
+    if N < 2:
+        raise ValueError("At least two observations are required.")
+
+    # -------------------------------------------------
+    # Step 1: Calculate pairwise squared distances
+    # in the low-dimensional embedding.
+    # -------------------------------------------------
+
+    D2 = pairwise_sqdist(Z)
+
+    # -------------------------------------------------
+    # Step 2: Calculate the unnormalized similarities.
+    # -------------------------------------------------
+
+    if kernel == "t":
+
+        # Student-t kernel with one degree of freedom:
+        #
+        # num_ij = 1 / (1 + ||z_i - z_j||^2)
+        num = 1.0 / (1.0 + D2)
+
+    else:
+
+        # Gaussian kernel:
+        #
+        # num_ij = exp(-||z_i - z_j||^2)
+        #
+        # Subtract the smallest off-diagonal distance
+        # for numerical stability. This does not change
+        # the normalized probability distribution.
+        off_diagonal = ~np.eye(N, dtype=bool)
+
+        min_dist = np.min(D2[off_diagonal])
+
+        num = np.exp(-(D2 - min_dist))
+
+    # Exclude self-similarities.
+    np.fill_diagonal(num, 0.0)
+
+    # -------------------------------------------------
+    # Step 3: Normalize the similarities.
+    # -------------------------------------------------
+
+    # Normalize over all ordered pairs i != j.
+    Q = num / np.sum(num)
+
+    # -------------------------------------------------
+    # Step 4: Calculate the KL-divergence objective.
+    # -------------------------------------------------
+
+    # Only entries where P is positive contribute.
+    mask = P > 0
+
+    # Floor Q inside the logarithm to avoid log(0).
+    Q_safe = np.maximum(Q[mask], 1e-300)
+
+    # Symmetric KL-divergence:
+    #
+    # KL(P || Q) = sum_ij P_ij * log(P_ij / Q_ij)
+    kl = float(
+        np.sum(
+            P[mask] * np.log(P[mask] / Q_safe)
+        )
+    )
+
+    # -------------------------------------------------
+    # Step 5: Calculate the gradient.
+    # -------------------------------------------------
+
+    # Difference between original-space and
+    # embedding-space joint probabilities.
+    PQ_diff = P - Q
+
+    if kernel == "t":
+
+        # Student-t gradient:
+        #
+        # grad_i = 4 * sum_j (
+        #   (p_ij - q_ij) * (z_i - z_j)
+        #   / (1 + ||z_i - z_j||^2)
+        # )
+
+        weights = PQ_diff / (1.0 + D2)
+
+    else:
+
+        # Gaussian SNE gradient:
+        #
+        # grad_i = 4 * sum_j (
+        #   (p_ij - q_ij) * (z_i - z_j)
+        # )
+
+        weights = PQ_diff
+
+    # -------------------------------------------------
+    # Step 6: Vectorize the gradient calculation.
+    # -------------------------------------------------
+
+    # sum_j w_ij * (z_i - z_j)
+    #
+    # Equivalent to:
+    # sum_j(w_ij) * z_i - sum_j(w_ij * z_j)
+    grad = 4.0 * (
+        np.sum(weights, axis=1, keepdims=True) * Z
+        - weights @ Z
+    )
+
+    # Return the KL objective and its gradient.
+    return kl, grad
+

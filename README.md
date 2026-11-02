@@ -37,6 +37,7 @@ python scaffold.py
 - [x] **25.** lle
 - [x] **26.** laplacian_eigenmaps
 - [x] **27.** conditional_p
+- [x] **28.** tsne_kl_grad
 
 ---
 
