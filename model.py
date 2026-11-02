@@ -1901,3 +1901,151 @@ def fit_mppca(X, K, L, n_iter=100, seed=0):
     # Return the fitted mixture model and likelihood trace.
     return pi, mus, Ws, sigma2s, trace
 
+# Step 19 - swiss_roll
+def swiss_roll(n=1000, noise=0.0, seed=0):
+    """
+    Generate a Swiss roll dataset and its true manifold coordinates.
+
+    Parameters
+    ----------
+    n : int, default=1000
+        Number of samples.
+
+    noise : float, default=0.0
+        Standard deviation of Gaussian noise added to the data.
+
+    seed : int, default=0
+        Random seed for reproducibility.
+
+    Returns
+    -------
+    X : ndarray of shape (n, 3)
+        Three-dimensional Swiss roll observations.
+
+    U : ndarray of shape (n, 2)
+        True manifold coordinates containing arc length s
+        and height h.
+    """
+
+    # Initialize the random number generator.
+    rng = np.random.default_rng(seed)
+
+    # Generate the spiral parameter t.
+    t = 1.5 * np.pi * (1.0 + 2.0 * rng.random(n))
+
+    # Generate the height coordinate.
+    h = 21.0 * rng.random(n)
+
+    # Construct the three-dimensional Swiss roll.
+    X = np.column_stack((
+        t * np.cos(t),
+        h,
+        t * np.sin(t)
+    ))
+
+    # Add Gaussian noise only when noise is positive.
+    if noise > 0:
+        X = X + noise * rng.standard_normal((n, 3))
+
+    # Calculate the true arc length along the spiral.
+    s = 0.5 * (
+        t * np.sqrt(1.0 + t**2)
+        + np.arcsinh(t)
+    )
+
+    # Construct the true two-dimensional manifold coordinates.
+    # First column: arc length along the spiral.
+    # Second column: height.
+    U = np.column_stack((s, h))
+
+    return X, U
+
+
+def unroll_score(Z, U):
+    """
+    Evaluate how well a low-dimensional embedding recovers
+    the true manifold coordinates using Spearman correlation.
+
+    For each column of U, calculate its Spearman rank
+    correlation with every column of Z and retain the
+    largest absolute correlation.
+
+    Parameters
+    ----------
+    Z : ndarray of shape (N, d)
+        Low-dimensional embedding.
+
+    U : ndarray of shape (N, q)
+        True manifold coordinates.
+
+    Returns
+    -------
+    tuple of floats
+        Maximum absolute Spearman correlations,
+        one for each column of U.
+    """
+
+    # Convert inputs into floating-point NumPy arrays.
+    Z = np.asarray(Z, dtype=float)
+    U = np.asarray(U, dtype=float)
+
+    # Ensure both inputs are two-dimensional.
+    if Z.ndim == 1:
+        Z = Z.reshape(-1, 1)
+
+    if U.ndim == 1:
+        U = U.reshape(-1, 1)
+
+    # Validate the number of observations.
+    if Z.shape[0] != U.shape[0]:
+        raise ValueError("Z and U must have the same number of observations.")
+
+    if Z.shape[0] < 2:
+        raise ValueError("At least two observations are required.")
+
+    # Compute the ranks of every embedding column.
+    # The data contain no ties, so double argsort gives
+    # the required ordinal ranks.
+    rank_Z = np.argsort(
+        np.argsort(Z, axis=0),
+        axis=0
+    ).astype(float)
+
+    rank_U = np.argsort(
+        np.argsort(U, axis=0),
+        axis=0
+    ).astype(float)
+
+    # Center the ranks.
+    rank_Z -= np.mean(rank_Z, axis=0, keepdims=True)
+    rank_U -= np.mean(rank_U, axis=0, keepdims=True)
+
+    # Compute the squared norms of the centered ranks.
+    norm_Z = np.sum(rank_Z**2, axis=0)
+    norm_U = np.sum(rank_U**2, axis=0)
+
+    # Calculate Spearman correlations between every pair
+    # of columns of Z and U.
+    scores = []
+
+    for j in range(U.shape[1]):
+
+        # Calculate correlations with every embedding column.
+        denominator = np.sqrt(norm_U[j] * norm_Z)
+
+        # Avoid division by zero for constant embedding columns.
+        correlations = np.divide(
+            rank_U[:, j] @ rank_Z,
+            denominator,
+            out=np.zeros(Z.shape[1], dtype=float),
+            where=denominator > 0
+        )
+
+        # Keep the largest absolute Spearman correlation.
+        best_score = np.max(np.abs(correlations))
+
+        scores.append(float(best_score))
+
+    # Return one Python float for each true manifold coordinate.
+    return tuple(scores)
+
