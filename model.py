@@ -3501,3 +3501,150 @@ def tsne_kl_grad(P, Z, kernel="t"):
     # Return the KL objective and its gradient.
     return kl, grad
 
+# Step 29 - fit_tsne
+def fit_tsne(
+    X,
+    perplexity=30.0,
+    n_iter=500,
+    lr=None,
+    seed=0,
+    kernel="t",
+    exaggeration=12.0,
+    exag_iters=100
+):
+    """
+    Fit a t-SNE or Gaussian SNE embedding using
+    momentum-based gradient descent.
+
+    Parameters
+    ----------
+    X : ndarray of shape (N, D)
+        Input observations.
+
+    perplexity : float, default=30.0
+        Target perplexity for conditional probabilities.
+
+    n_iter : int, default=500
+        Number of optimization iterations.
+
+    lr : float or None, default=None
+        Learning rate. If None, uses max(N / 8, 50).
+
+    seed : int, default=0
+        Random seed for reproducibility.
+
+    kernel : str, default="t"
+        Embedding kernel: "t" or "gauss".
+
+    exaggeration : float, default=12.0
+        Early exaggeration factor.
+
+    exag_iters : int, default=100
+        Number of early exaggeration iterations.
+
+    Returns
+    -------
+    Z : ndarray of shape (N, 2)
+        Final two-dimensional embedding.
+
+    trace : ndarray of shape (n_iter,)
+        True KL-divergence at every iteration.
+    """
+
+    # Convert input into a floating-point NumPy array.
+    X = np.asarray(X, dtype=float)
+
+    # Get the number of observations.
+    N = X.shape[0]
+
+    # Validate the input.
+    if X.ndim != 2 or N < 2:
+        raise ValueError("X must contain at least two observations.")
+
+    if not isinstance(n_iter, (int, np.integer)) or n_iter < 0:
+        raise ValueError("n_iter must be a non-negative integer.")
+
+    if not isinstance(exag_iters, (int, np.integer)) or exag_iters < 0:
+        raise ValueError("exag_iters must be a non-negative integer.")
+
+    if not np.isfinite(exaggeration) or exaggeration <= 0:
+        raise ValueError("exaggeration must be positive and finite.")
+
+    if lr is not None and (not np.isfinite(lr) or lr <= 0):
+        raise ValueError("lr must be positive and finite.")
+
+    # -------------------------------------------------
+    # Step 1: Calculate high-dimensional probabilities.
+    # -------------------------------------------------
+
+    # Calculate conditional probabilities using the
+    # target perplexity and squared Euclidean distances.
+    P_cond, _ = conditional_p(
+        pairwise_sqdist(X),
+        perplexity
+    )
+
+    # Symmetrize the conditional probabilities.
+    #
+    # p_ij = (p_j|i + p_i|j) / (2N)
+    P = (P_cond + P_cond.T) / (2.0 * N)
+
+    # -------------------------------------------------
+    # Step 2: Set the learning rate.
+    # -------------------------------------------------
+
+    if lr is None:
+        lr = max(N / 8.0, 50.0)
+
+    # -------------------------------------------------
+    # Step 3: Initialize the low-dimensional embedding.
+    # -------------------------------------------------
+
+    # Initialize the random number generator.
+    rng = np.random.default_rng(seed)
+
+    # Start with small random coordinates.
+    Z = 1e-4 * rng.standard_normal((N, 2))
+
+    # Initialize velocity to zero.
+    v = np.zeros_like(Z)
+
+    # Allocate the KL-divergence history.
+    trace = np.empty(n_iter, dtype=float)
+
+    # -------------------------------------------------
+    # Step 4: Gradient descent optimization.
+    # -------------------------------------------------
+
+    for it in range(n_iter):
+
+        # Determine the early exaggeration factor.
+        boost = exaggeration if it < exag_iters else 1.0
+
+        # Calculate the KL objective and gradient.
+        # During early exaggeration, use boosted P.
+        kl, g = tsne_kl_grad(
+            P * boost,
+            Z,
+            kernel=kernel
+        )
+
+        # Record the TRUE KL-divergence of P.
+        # Correct for the early exaggeration factor.
+        trace[it] = kl / boost - np.log(boost)
+
+        # Select the momentum coefficient.
+        momentum = 0.5 if it < exag_iters else 0.8
+
+        # Update the velocity using momentum.
+        v = momentum * v - lr * g
+
+        # Update the embedding coordinates.
+        Z = Z + v
+
+        # Re-center the embedding after every iteration.
+        Z = Z - np.mean(Z, axis=0, keepdims=True)
+
+    # Return the final embedding and KL-divergence history.
+    return Z, trace
+

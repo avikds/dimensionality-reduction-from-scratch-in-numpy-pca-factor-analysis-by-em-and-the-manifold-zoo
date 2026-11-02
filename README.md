@@ -38,6 +38,7 @@ python scaffold.py
 - [x] **26.** laplacian_eigenmaps
 - [x] **27.** conditional_p
 - [x] **28.** tsne_kl_grad
+- [x] **29.** fit_tsne
 
 ---
 
