@@ -1454,3 +1454,129 @@ def sensor_noise_experiment(n=2000, noise_var=25.0, seed=0):
         "sigma2": float(sigma2)
     }
 
+# Step 16 - em_pca
+def em_pca(X, L, n_iter=50, seed=0):
+    """
+    Perform PCA using the EM algorithm in the zero-noise limit.
+
+    Parameters
+    ----------
+    X : ndarray of shape (N, D)
+        Input data, with one example per row.
+
+    L : int
+        Number of principal components.
+
+    n_iter : int
+        Number of EM iterations.
+
+    seed : int
+        Random seed for initialization.
+
+    Returns
+    -------
+    mu : ndarray of shape (D,)
+        Sample mean.
+
+    W : ndarray of shape (D, L)
+        Orthonormal principal components in decreasing
+        order of eigenvalues.
+
+    lam : ndarray of shape (L,)
+        Principal component eigenvalues in decreasing order.
+
+    errs : ndarray of shape (n_iter,)
+        Reconstruction error after each EM iteration.
+    """
+
+    # Convert input to a floating-point NumPy array.
+    X = np.asarray(X, dtype=float)
+
+    # Get the number of samples and features.
+    N, D = X.shape
+
+    # Compute the sample mean and center the data.
+    mu = np.mean(X, axis=0)
+    Xc = X - mu
+
+    # Transpose so that observations are stored in columns.
+    Xt = Xc.T
+
+    # Initialize the random number generator.
+    rng = np.random.default_rng(seed)
+
+    # Initialize the loading matrix.
+    W = rng.standard_normal((D, L))
+
+    # Store reconstruction errors after each iteration.
+    errs = []
+
+    # Run the EM algorithm.
+    for _ in range(n_iter):
+
+        # -----------------------------
+        # E-step
+        # -----------------------------
+        # Z = (W.T @ W)^(-1) @ W.T @ Xt
+        #
+        # Solve the linear system instead of explicitly
+        # calculating the matrix inverse.
+        Z = np.linalg.solve(
+            W.T @ W,
+            W.T @ Xt
+        )
+
+        # -----------------------------
+        # M-step
+        # -----------------------------
+        # W = Xt @ Z.T @ (Z @ Z.T)^(-1)
+        #
+        # Solve the transposed linear system for stability.
+        ZZT = Z @ Z.T
+
+        W = np.linalg.solve(
+            ZZT.T,
+            (Xt @ Z.T).T
+        ).T
+
+        # Calculate reconstruction error after the M-step.
+        reconstruction = W @ Z
+
+        error = np.sum((Xt - reconstruction) ** 2) / N
+
+        errs.append(float(error))
+
+    # -----------------------------
+    # Final orthonormalization
+    # -----------------------------
+
+    # Obtain an orthonormal basis for the learned subspace.
+    Q, _ = np.linalg.qr(W)
+
+    # Project the centered data onto the orthonormal basis.
+    Zq = Q.T @ Xt
+
+    # Compute the L x L covariance matrix in the projected space.
+    Cq = Zq @ Zq.T / N
+
+    # Eigendecompose the projected covariance matrix.
+    eigenvalues, eigenvectors = np.linalg.eigh(Cq)
+
+    # Sort eigenvalues in decreasing order.
+    order = np.argsort(eigenvalues)[::-1]
+
+    lam = eigenvalues[order]
+
+    # Rotate the orthonormal basis using the sorted eigenvectors.
+    W = Q @ eigenvectors[:, order]
+
+    # Fix eigenvector signs for deterministic results.
+    W = fix_signs(W)
+
+    # Clip tiny negative eigenvalues caused by floating-point errors.
+    lam = np.maximum(lam, 0.0)
+
+    # Return the mean, ordered orthonormal basis,
+    # eigenvalues, and reconstruction error history.
+    return mu, W, lam, np.asarray(errs)
+

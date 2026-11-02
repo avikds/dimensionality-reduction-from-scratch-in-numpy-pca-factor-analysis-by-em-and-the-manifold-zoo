@@ -25,6 +25,7 @@ python scaffold.py
 - [x] **13.** fit_fa
 - [x] **14.** varimax
 - [x] **15.** sensor_noise_experiment
+- [x] **16.** em_pca
 
 ---
 
