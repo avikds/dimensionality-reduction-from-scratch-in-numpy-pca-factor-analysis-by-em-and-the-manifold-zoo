@@ -2443,3 +2443,157 @@ def knn_geodesics(D2, k):
 
     return G
 
+# Step 23 - isomap
+def isomap(X, k=10, L=2):
+    """
+    Perform Isomap dimensionality reduction.
+
+    Parameters
+    ----------
+    X : ndarray of shape (N, D)
+        Input observations.
+
+    k : int, default=10
+        Number of nearest neighbours used to construct
+        the neighbourhood graph.
+
+    L : int, default=2
+        Number of embedding dimensions.
+
+    Returns
+    -------
+    Z : ndarray of shape (len(keep), L)
+        Low-dimensional Isomap embedding.
+
+    keep : ndarray of shape (len(keep),)
+        Sorted indices of observations belonging to
+        the largest connected component.
+
+    lam : ndarray
+        Eigenvalues returned by Classical MDS.
+    """
+
+    # Convert input into a floating-point NumPy array.
+    X = np.asarray(X, dtype=float)
+
+    # Get the number of observations.
+    N = X.shape[0]
+
+    # Compute squared Euclidean distances.
+    D2 = pairwise_sqdist(X)
+
+    # Compute approximate geodesic distances using
+    # the symmetric k-nearest-neighbour graph.
+    G = knn_geodesics(D2, k)
+
+    # -------------------------------------------------
+    # Identify connected components
+    # -------------------------------------------------
+
+    # For each row, find the first finite entry.
+    # All points belonging to the same connected component
+    # have the same first finite column index.
+    component_labels = np.argmax(
+        np.isfinite(G),
+        axis=1
+    )
+
+    # Count the number of observations in each component.
+    unique_labels, counts = np.unique(
+        component_labels,
+        return_counts=True
+    )
+
+    # Select the largest connected component.
+    # np.argmax selects the first component in case of a tie.
+    largest_component = unique_labels[np.argmax(counts)]
+
+    # Obtain the sorted original indices of the selected points.
+    keep = np.flatnonzero(
+        component_labels == largest_component
+    )
+
+    # -------------------------------------------------
+    # Apply Classical MDS to the geodesic distances
+    # -------------------------------------------------
+
+    # Extract the geodesic distances within the largest
+    # connected component.
+    G_kept = G[np.ix_(keep, keep)]
+
+    # Classical MDS expects squared distances.
+    D2_geodesic = G_kept ** 2
+
+    # Compute the low-dimensional Isomap embedding.
+    Z, lam = classical_mds(D2_geodesic, L)
+
+    # Return embedding, retained indices, and eigenvalues.
+    return Z, keep, lam
+
+
+def short_circuit_count(D2, U, k, gap=15.0):
+    """
+    Count directed nearest-neighbour edges that connect
+    points far apart in their true manifold coordinates.
+
+    Parameters
+    ----------
+    D2 : ndarray of shape (N, N)
+        Squared Euclidean distances in the observed space.
+
+    U : ndarray of shape (N, q)
+        True manifold coordinates.
+
+    k : int
+        Number of nearest neighbours.
+
+    gap : float, default=15.0
+        Minimum manifold distance for an edge to be
+        considered a short-circuit edge.
+
+    Returns
+    -------
+    int
+        Number of directed nearest-neighbour edges whose
+        endpoints are more than gap apart in U.
+    """
+
+    # Convert inputs into floating-point NumPy arrays.
+    D2 = np.asarray(D2, dtype=float)
+    U = np.asarray(U, dtype=float)
+
+    # Get the number of observations.
+    N = D2.shape[0]
+
+    # Validate input dimensions.
+    if D2.ndim != 2 or D2.shape != (N, N):
+        raise ValueError("D2 must be a square distance matrix.")
+
+    if U.ndim != 2 or U.shape[0] != N:
+        raise ValueError("U must have the same number of observations as D2.")
+
+    # Validate the number of neighbours.
+    if not isinstance(k, (int, np.integer)) or not 1 <= k < N:
+        raise ValueError("k must be an integer between 1 and N - 1.")
+
+    # Validate the manifold distance threshold.
+    if not np.isscalar(gap) or not np.isfinite(gap) or gap < 0:
+        raise ValueError("gap must be a non-negative finite number.")
+
+    # Find the k nearest neighbours in the observed space.
+    # Each row contains directed nearest-neighbour connections.
+    neighbors = knn_indices(D2, k)
+
+    # Calculate true manifold distances between each point
+    # and its selected nearest neighbours.
+    manifold_distances = np.linalg.norm(
+        U[:, None, :] - U[neighbors],
+        axis=2
+    )
+
+    # Count directed edges whose manifold distance exceeds gap.
+    count = np.count_nonzero(manifold_distances > gap)
+
+    # Return a Python integer.
+    return int(count)
+

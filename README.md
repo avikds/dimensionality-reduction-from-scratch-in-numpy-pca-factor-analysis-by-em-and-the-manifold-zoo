@@ -32,6 +32,7 @@ python scaffold.py
 - [x] **20.** classical_mds
 - [x] **21.** trustworthiness
 - [x] **22.** knn_geodesics
+- [x] **23.** isomap
 
 ---
 
