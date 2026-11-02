@@ -35,6 +35,7 @@ python scaffold.py
 - [x] **23.** isomap
 - [x] **24.** kernel_pca
 - [x] **25.** lle
+- [x] **26.** laplacian_eigenmaps
 
 ---
 

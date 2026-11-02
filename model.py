@@ -2916,3 +2916,271 @@ def lle(X, k=10, L=2, reg=1e-3):
     # Return the embedding and reconstruction weights.
     return Z, W
 
+# Step 26 - laplacian_eigenmaps
+def fix_signs(W):
+    W = np.asarray(W, dtype=float)
+    rows = np.argmax(np.abs(W), axis=0)
+    flips = np.sign(W[rows, np.arange(W.shape[1])])
+    flips[flips == 0] = 1.0
+    return W * flips
+
+
+def pairwise_sqdist(A, B=None):
+    A = np.asarray(A, dtype=float)
+    B = A if B is None else np.asarray(B, dtype=float)
+
+    d2 = (
+        (A ** 2).sum(axis=1)[:, None]
+        + (B ** 2).sum(axis=1)[None, :]
+        - 2.0 * A @ B.T
+    )
+
+    return np.clip(d2, 0.0, None)
+
+
+def knn_indices(D2, k):
+    D2 = np.array(D2, dtype=float, copy=True)
+    np.fill_diagonal(D2, np.inf)
+    return np.argsort(D2, axis=1, kind="stable")[:, :k]
+
+
+def graph_weights(X, k, sigma):
+    """
+    Construct a symmetric k-nearest-neighbour graph
+    with heat-kernel edge weights.
+
+    Parameters
+    ----------
+    X : ndarray of shape (N, D)
+        Input observations.
+
+    k : int
+        Number of nearest neighbours.
+
+    sigma : float
+        Heat-kernel bandwidth parameter.
+
+    Returns
+    -------
+    W : ndarray of shape (N, N)
+        Symmetric graph weight matrix with zeros on the diagonal.
+    """
+
+    # Convert input into a floating-point NumPy array.
+    X = np.asarray(X, dtype=float)
+
+    # Get the number of observations.
+    N = X.shape[0]
+
+    # Validate the input.
+    if X.ndim != 2 or N < 2:
+        raise ValueError("X must contain at least two observations.")
+
+    if not isinstance(k, (int, np.integer)) or not 1 <= k < N:
+        raise ValueError("k must be an integer between 1 and N - 1.")
+
+    if not np.isscalar(sigma) or not np.isfinite(sigma) or sigma <= 0:
+        raise ValueError("sigma must be a positive finite scalar.")
+
+    # Compute squared Euclidean distances.
+    D2 = pairwise_sqdist(X)
+
+    # Find the k nearest neighbours of every observation.
+    neighbors = knn_indices(D2, k)
+
+    # Construct the directed nearest-neighbour adjacency matrix.
+    adjacency = np.zeros((N, N), dtype=bool)
+
+    adjacency[np.arange(N)[:, None], neighbors] = True
+
+    # Symmetrize the graph.
+    # An edge exists if either endpoint selects the other.
+    adjacency = adjacency | adjacency.T
+
+    # Calculate the heat-kernel weights:
+    #
+    # W_ij = exp(-||x_i - x_j||^2 / (2 * sigma^2))
+    W = np.exp(
+        -D2 / (2.0 * sigma**2)
+    )
+
+    # Retain weights only for neighbouring observations.
+    W *= adjacency
+
+    # Explicitly set the diagonal to zero.
+    np.fill_diagonal(W, 0.0)
+
+    return W
+
+
+def dirichlet_energy(W, f):
+    """
+    Calculate the Dirichlet energy f.T @ L @ f,
+    where L is the unnormalized graph Laplacian.
+
+    Parameters
+    ----------
+    W : ndarray of shape (N, N)
+        Symmetric graph weight matrix.
+
+    f : ndarray of shape (N,)
+        Function values defined on graph vertices.
+
+    Returns
+    -------
+    float
+        Dirichlet energy.
+    """
+
+    # Convert inputs into floating-point NumPy arrays.
+    W = np.asarray(W, dtype=float)
+    f = np.asarray(f, dtype=float)
+
+    # Ensure f is a one-dimensional vector.
+    f = f.ravel()
+
+    # Validate dimensions.
+    if W.ndim != 2 or W.shape[0] != W.shape[1]:
+        raise ValueError("W must be a square matrix.")
+
+    if f.shape != (W.shape[0],):
+        raise ValueError("f must contain one value per graph vertex.")
+
+    # Calculate the degree vector.
+    degrees = np.sum(W, axis=1)
+
+    # Apply the graph Laplacian:
+    # L = D - W
+    Lf = degrees * f - W @ f
+
+    # Calculate f.T @ L @ f.
+    energy = f @ Lf
+
+    # Return a Python float.
+    return float(energy)
+
+
+def laplacian_eigenmaps(X, k=10, sigma=1.0, L=2):
+    """
+    Perform dimensionality reduction using Laplacian Eigenmaps.
+
+    Parameters
+    ----------
+    X : ndarray of shape (N, D)
+        Input observations.
+
+    k : int, default=10
+        Number of nearest neighbours.
+
+    sigma : float, default=1.0
+        Heat-kernel bandwidth parameter.
+
+    L : int, default=2
+        Number of embedding dimensions.
+
+    Returns
+    -------
+    Z : ndarray of shape (N, L)
+        Low-dimensional embedding.
+
+    lam : ndarray of shape (N,)
+        All eigenvalues in increasing order,
+        with numerical negative values clipped to zero.
+
+    W : ndarray of shape (N, N)
+        Symmetric heat-kernel graph weight matrix.
+    """
+
+    # Convert input into a floating-point NumPy array.
+    X = np.asarray(X, dtype=float)
+
+    # Get the number of observations.
+    N = X.shape[0]
+
+    # Validate the input.
+    if X.ndim != 2 or N < 2:
+        raise ValueError("X must contain at least two observations.")
+
+    if not isinstance(L, (int, np.integer)) or not 0 <= L < N:
+        raise ValueError("L must be an integer between 0 and N - 1.")
+
+    # -------------------------------------------------
+    # Step 1: Construct the heat-kernel graph.
+    # -------------------------------------------------
+
+    W = graph_weights(X, k, sigma)
+
+    # -------------------------------------------------
+    # Step 2: Construct the graph Laplacian.
+    # -------------------------------------------------
+
+    # Compute the degree vector.
+    degrees = np.sum(W, axis=1)
+
+    # Construct the degree matrix implicitly:
+    # D = diag(degrees)
+    #
+    # The unnormalized graph Laplacian is:
+    # L_graph = D - W
+    L_graph = np.diag(degrees) - W
+
+    # -------------------------------------------------
+    # Step 3: Construct the symmetric normalized Laplacian.
+    # -------------------------------------------------
+
+    # Calculate D^(-1/2).
+    #
+    # A zero-degree vertex receives an inverse degree of zero
+    # to avoid division-by-zero errors.
+    inv_sqrt_degrees = np.divide(
+        1.0,
+        np.sqrt(degrees),
+        out=np.zeros_like(degrees),
+        where=degrees > 0
+    )
+
+    # Compute:
+    # L_sym = D^(-1/2) @ L_graph @ D^(-1/2)
+    L_sym = (
+        inv_sqrt_degrees[:, None]
+        * L_graph
+        * inv_sqrt_degrees[None, :]
+    )
+
+    # Ensure numerical symmetry.
+    L_sym = 0.5 * (L_sym + L_sym.T)
+
+    # -------------------------------------------------
+    # Step 4: Eigendecomposition.
+    # -------------------------------------------------
+
+    # Compute eigenvalues and eigenvectors.
+    # eigh returns eigenvalues in increasing order.
+    eigenvalues, eigenvectors = np.linalg.eigh(L_sym)
+
+    # Clip rounding-level negative eigenvalues to zero.
+    lam = np.maximum(eigenvalues, 0.0)
+
+    # -------------------------------------------------
+    # Step 5: Obtain the generalized eigenvectors.
+    # -------------------------------------------------
+
+    # Convert the symmetric eigenvectors into generalized
+    # eigenvectors using:
+    #
+    # z = D^(-1/2) @ u
+    #
+    # Skip the first eigenvector corresponding to lambda = 0.
+    U_L = eigenvectors[:, 1:L + 1]
+
+    Z = (
+        inv_sqrt_degrees[:, None]
+        * U_L
+    )
+
+    # Fix the signs of the embedding coordinates.
+    Z = fix_signs(Z)
+
+    # Return the embedding, all eigenvalues, and graph weights.
+    return Z, lam, W
+
