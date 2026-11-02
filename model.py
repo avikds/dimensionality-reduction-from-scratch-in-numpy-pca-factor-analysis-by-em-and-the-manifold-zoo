@@ -512,3 +512,60 @@ def profile_log_likelihood(eigvals):
     # Return all profile log-likelihood scores.
     return ell
 
+# Step 7 - ppca_fit
+def ppca_fit(X, L):
+    """
+    Fit Probabilistic PCA using its closed-form maximum-likelihood solution.
+
+    Parameters
+    ----------
+    X : ndarray of shape (N, D)
+        Input dataset, with one observation per row.
+
+    L : int
+        Number of latent dimensions.
+
+    Returns
+    -------
+    mu : ndarray of shape (D,)
+        Sample mean.
+
+    W : ndarray of shape (D, L)
+        PPCA loading matrix.
+
+    sigma2 : float
+        Maximum-likelihood isotropic noise variance.
+    """
+
+    # Convert input into a floating-point NumPy array.
+    X = np.asarray(X, dtype=float)
+
+    # Get the number of features.
+    D = X.shape[1]
+
+    # Fit PCA using the existing SVD-based implementation.
+    # U_L contains the top L eigenvectors as columns.
+    # lam contains the available covariance eigenvalues.
+    mu, U_L, lam, _ = pca_svd(X, L)
+
+    # Estimate the isotropic noise variance.
+    # When L < D, average all discarded eigenvalues.
+    if L < D:
+        # Eigenvalues not returned by thin SVD when N < D
+        # correspond to exact zeros and need not be explicitly appended.
+        sigma2 = float(np.sum(lam[L:]) / (D - L))
+    else:
+        # No discarded dimensions remain.
+        sigma2 = 0.0
+
+    # Calculate the square-root scaling factors.
+    # Clip small negative differences caused by numerical precision.
+    scales = np.sqrt(np.maximum(lam[:L] - sigma2, 0.0))
+
+    # Construct the PPCA loading matrix:
+    # W = U_L @ sqrt(Lambda_L - sigma2 * I)
+    W = U_L * scales[np.newaxis, :]
+
+    # Return the sample mean, loading matrix, and noise variance.
+    return mu, W, float(sigma2)
+

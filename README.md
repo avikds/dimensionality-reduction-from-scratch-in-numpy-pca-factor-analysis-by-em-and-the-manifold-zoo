@@ -16,6 +16,7 @@ python scaffold.py
 - [x] **4.** correlation_pca
 - [x] **5.** reconstruction_curves
 - [x] **6.** profile_log_likelihood
+- [x] **7.** ppca_fit
 
 ---
 
