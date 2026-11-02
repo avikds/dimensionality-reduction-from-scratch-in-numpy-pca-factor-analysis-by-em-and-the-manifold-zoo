@@ -19,6 +19,7 @@ python scaffold.py
 - [x] **7.** ppca_fit
 - [x] **8.** ppca_logpdf
 - [x] **9.** ppca_posterior
+- [x] **10.** heldout_loglik_curve
 
 ---
 

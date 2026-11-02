@@ -747,3 +747,79 @@ def ppca_posterior(X, mu, W, sigma2):
     # Return posterior means and shared posterior covariance.
     return means, cov
 
+# Step 10 - heldout_loglik_curve
+def heldout_loglik_curve(X_train, X_test, Ls):
+    """
+    Evaluate PPCA using training and held-out log-likelihood
+    for different numbers of latent dimensions.
+
+    Parameters
+    ----------
+    X_train : ndarray of shape (N_train, D)
+        Training dataset.
+
+    X_test : ndarray of shape (N_test, D)
+        Test dataset.
+
+    Ls : list or array
+        Numbers of latent dimensions to evaluate.
+
+    Returns
+    -------
+    dict
+        {
+            "train": array of mean training log-likelihoods,
+            "test": array of mean test log-likelihoods,
+            "best_L": optimal number of latent dimensions
+        }
+    """
+
+    # Convert datasets into floating-point NumPy arrays.
+    X_train = np.asarray(X_train, dtype=float)
+    X_test = np.asarray(X_test, dtype=float)
+
+    # Convert Ls into a list.
+    Ls = list(Ls)
+
+    # Ensure that at least one component count is provided.
+    if len(Ls) == 0:
+        raise ValueError("Ls must contain at least one component count.")
+
+    # Store the average log-likelihoods.
+    train_scores = []
+    test_scores = []
+
+    # Evaluate PPCA for every requested latent dimension.
+    for L in Ls:
+
+        # Fit PPCA using only the training dataset.
+        mu, W, sigma2 = ppca_fit(X_train, L)
+
+        # Calculate the log-likelihood of the training observations.
+        train_logpdf = ppca_logpdf(
+            X_train, mu, W, sigma2
+        )
+
+        # Calculate the log-likelihood of the test observations
+        # using the same model fitted on the training dataset.
+        test_logpdf = ppca_logpdf(
+            X_test, mu, W, sigma2
+        )
+
+        # Calculate mean log-likelihood per observation.
+        train_scores.append(np.mean(train_logpdf))
+        test_scores.append(np.mean(test_logpdf))
+
+    # Find the index with the highest test log-likelihood.
+    best_index = int(np.argmax(test_scores))
+
+    # Retrieve the corresponding number of latent dimensions.
+    best_L = int(Ls[best_index])
+
+    # Return the evaluation results.
+    return {
+        "train": np.array(train_scores),
+        "test": np.array(test_scores),
+        "best_L": best_L
+    }
+
