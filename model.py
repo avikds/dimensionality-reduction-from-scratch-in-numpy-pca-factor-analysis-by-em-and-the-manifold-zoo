@@ -2128,3 +2128,227 @@ def classical_mds(D2, L):
     # Return the embedding and all original eigenvalues.
     return Z, lam
 
+# Step 21 - trustworthiness
+def pairwise_sqdist(A, B=None):
+    A = np.asarray(A, dtype=float)
+    B = A if B is None else np.asarray(B, dtype=float)
+
+    d2 = (
+        (A ** 2).sum(axis=1)[:, None]
+        + (B ** 2).sum(axis=1)[None, :]
+        - 2.0 * A @ B.T
+    )
+
+    return np.clip(d2, 0.0, None)
+
+
+def knn_indices(D2, k):
+    """
+    Return the indices of the k nearest neighbours
+    of every point, excluding the point itself.
+
+    Parameters
+    ----------
+    D2 : ndarray of shape (N, N)
+        Squared pairwise distance matrix.
+
+    k : int
+        Number of neighbours.
+
+    Returns
+    -------
+    ndarray of shape (N, k)
+        Indices of nearest neighbours.
+    """
+
+    D2 = np.array(D2, dtype=float)
+    np.fill_diagonal(D2, np.inf)
+
+    return np.argsort(D2, axis=1, kind="stable")[:, :k]
+
+
+def trustworthiness(D2, Z, k=5):
+    """
+    Calculate the trustworthiness of a low-dimensional embedding.
+
+    Parameters
+    ----------
+    D2 : ndarray of shape (N, N)
+        Squared distances in the original space.
+
+    Z : ndarray of shape (N, L)
+        Low-dimensional embedding.
+
+    k : int, default=5
+        Number of nearest neighbours.
+
+    Returns
+    -------
+    float
+        Trustworthiness score of the embedding.
+    """
+
+    # Convert inputs into floating-point NumPy arrays.
+    D2 = np.asarray(D2, dtype=float)
+    Z = np.asarray(Z, dtype=float)
+
+    # Get the number of observations.
+    N = D2.shape[0]
+
+    # Validate input dimensions.
+    if D2.ndim != 2 or D2.shape != (N, N):
+        raise ValueError("D2 must be a square distance matrix.")
+
+    if Z.ndim != 2 or Z.shape[0] != N:
+        raise ValueError("Z must have the same number of observations as D2.")
+
+    if not isinstance(k, (int, np.integer)) or not 1 <= k < N / 2:
+        raise ValueError("k must be an integer satisfying 1 <= k < N/2.")
+
+    # -----------------------------------------
+    # 1. Calculate original-space neighbour ranks
+    # -----------------------------------------
+
+    # Stable sorting of original-space distances.
+    # The diagonal is zero, so each point receives rank 0
+    # and its nearest other point receives rank 1.
+    sorted_indices = np.argsort(D2, axis=1, kind="stable")
+
+    # Convert sorted indices into rank positions.
+    ranks = np.empty_like(sorted_indices)
+
+    ranks[
+        np.arange(N)[:, None],
+        sorted_indices
+    ] = np.arange(N)[None, :]
+
+    # -----------------------------------------
+    # 2. Find neighbours in the embedding space
+    # -----------------------------------------
+
+    # Calculate squared pairwise distances in the embedding.
+    D2_embedding = pairwise_sqdist(Z)
+
+    # Obtain the k nearest neighbours of each embedded point.
+    embedding_neighbors = knn_indices(D2_embedding, k)
+
+    # -----------------------------------------
+    # 3. Calculate the trustworthiness penalty
+    # -----------------------------------------
+
+    # Retrieve the original-space ranks of embedding neighbours.
+    neighbor_ranks = ranks[
+        np.arange(N)[:, None],
+        embedding_neighbors
+    ]
+
+    # Only penalize neighbours that were not among
+    # the original k nearest neighbours.
+    penalties = np.maximum(neighbor_ranks - k, 0)
+
+    # Sum all neighbourhood violations.
+    total_penalty = np.sum(penalties)
+
+    # -----------------------------------------
+    # 4. Normalize the trustworthiness score
+    # -----------------------------------------
+
+    denominator = N * k * (2 * N - 3 * k - 1)
+
+    score = 1.0 - (
+        2.0 * total_penalty / denominator
+    )
+
+    # Return a Python float.
+    return float(score)
+
+
+def knn_accuracy(Z, y, k=5):
+    """
+    Calculate leave-one-out k-nearest-neighbour classification
+    accuracy using a low-dimensional embedding.
+
+    Parameters
+    ----------
+    Z : ndarray of shape (N, L)
+        Low-dimensional embedding.
+
+    y : ndarray of shape (N,)
+        Integer class labels.
+
+    k : int, default=5
+        Number of neighbours used for classification.
+
+    Returns
+    -------
+    float
+        Leave-one-out classification accuracy.
+    """
+
+    # Convert inputs into NumPy arrays.
+    Z = np.asarray(Z, dtype=float)
+    y = np.asarray(y)
+
+    # Ensure Z is two-dimensional.
+    if Z.ndim != 2:
+        raise ValueError("Z must be a two-dimensional array.")
+
+    # Validate the labels.
+    if y.ndim != 1:
+        raise ValueError("y must be a one-dimensional array.")
+
+    N = Z.shape[0]
+
+    if len(y) != N:
+        raise ValueError("Z and y must contain the same number of observations.")
+
+    if not isinstance(k, (int, np.integer)) or not 1 <= k < N:
+        raise ValueError("k must be an integer satisfying 1 <= k < N.")
+
+    # -----------------------------------------
+    # 1. Calculate embedding-space distances
+    # -----------------------------------------
+
+    D2 = pairwise_sqdist(Z)
+
+    # Obtain k nearest neighbours, excluding each point itself.
+    neighbors = knn_indices(D2, k)
+
+    # Store the number of correct predictions.
+    correct = 0
+
+    # -----------------------------------------
+    # 2. Leave-one-out majority-vote classification
+    # -----------------------------------------
+
+    for i in range(N):
+
+        # Get the labels of the k nearest neighbours.
+        neighbor_labels = y[neighbors[i]]
+
+        # Count the occurrences of each label.
+        labels, counts = np.unique(
+            neighbor_labels,
+            return_counts=True
+        )
+
+        # Find the largest vote count.
+        max_count = np.max(counts)
+
+        # Resolve ties by choosing the smallest label.
+        predicted_label = np.min(
+            labels[counts == max_count]
+        )
+
+        # Check whether the predicted label is correct.
+        if predicted_label == y[i]:
+            correct += 1
+
+    # -----------------------------------------
+    # 3. Calculate classification accuracy
+    # -----------------------------------------
+
+    accuracy = correct / N
+
+    return float(accuracy)
+
