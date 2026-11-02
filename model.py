@@ -176,3 +176,88 @@ def pca_gram(X, L):
     # and all N covariance eigenvalues.
     return mu, W, lam
 
+# Step 3 - pca_svd
+def pca_svd(X, L):
+    """
+    Perform PCA using the thin SVD of the centered data matrix.
+
+    Parameters
+    ----------
+    X : ndarray of shape (N, D)
+        Input data, with one example per row.
+    L : int
+        Number of principal components to retain.
+
+    Returns
+    -------
+    mu : ndarray of shape (D,)
+        Feature-wise mean.
+
+    W : ndarray of shape (D, L)
+        First L right singular vectors as columns,
+        with deterministic signs.
+
+    lam : ndarray of shape (min(N, D),)
+        All covariance eigenvalues in decreasing order.
+
+    Z : ndarray of shape (N, L)
+        Principal component scores for the first L components.
+    """
+
+    # Convert input into a floating-point NumPy array.
+    X = np.asarray(X, dtype=float)
+
+    # Get the number of samples and features.
+    N, D = X.shape
+
+    # Validate the number of principal components.
+    K = min(N, D)
+
+    if not isinstance(L, (int, np.integer)) or not 0 <= L <= K:
+        raise ValueError("L must be an integer between 0 and min(N, D).")
+
+    if N == 0 or D == 0:
+        raise ValueError("X must contain at least one sample and one feature.")
+
+    # Compute the feature-wise mean.
+    mu = np.mean(X, axis=0)
+
+    # Center the data.
+    Xc = X - mu
+
+    # Compute the thin SVD:
+    # Xc = U @ diag(s) @ Vt
+    #
+    # U  : (N, K)
+    # s  : (K,)
+    # Vt : (K, D)
+    U, s, Vt = np.linalg.svd(Xc, full_matrices=False)
+
+    # Compute all covariance eigenvalues.
+    # Eigenvalues are already in decreasing order because
+    # singular values returned by SVD are sorted.
+    lam = (s ** 2) / N
+
+    # Extract the first L right singular vectors as columns.
+    W_raw = Vt[:L, :].T
+
+    # Fix the signs of the principal component directions.
+    W = fix_signs(W_raw)
+
+    # Determine the sign flips applied to each column of W.
+    # These same sign flips must also be applied to the scores.
+    flips = np.sign(np.sum(W_raw * W, axis=0))
+    flips[flips == 0] = 1.0
+
+    # Compute principal component scores directly from
+    # the left singular vectors and singular values.
+    # Z = U[:, :L] @ diag(s[:L])
+    Z = U[:, :L] * s[:L]
+
+    # Apply the same sign changes used for W.
+    Z = Z * flips[None, :]
+
+    # Return the mean, principal components,
+    # covariance eigenvalues, and principal component scores.
+    return mu, W, lam, Z
+
