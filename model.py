@@ -3184,3 +3184,161 @@ def laplacian_eigenmaps(X, k=10, sigma=1.0, L=2):
     # Return the embedding, all eigenvalues, and graph weights.
     return Z, lam, W
 
+# Step 27 - conditional_p
+def conditional_p(D2, perplexity=30.0, tol=1e-5, max_iter=50):
+    """
+    Compute conditional neighbourhood probabilities for SNE
+    using binary search to calibrate the Gaussian bandwidth
+    of every observation.
+
+    Parameters
+    ----------
+    D2 : ndarray of shape (N, N)
+        Squared pairwise distance matrix.
+
+    perplexity : float, default=30.0
+        Target perplexity of each conditional distribution.
+
+    tol : float, default=1e-5
+        Convergence tolerance for entropy.
+
+    max_iter : int, default=50
+        Maximum number of binary search iterations per observation.
+
+    Returns
+    -------
+    P : ndarray of shape (N, N)
+        Conditional probability matrix with zero diagonal.
+
+    sigmas : ndarray of shape (N,)
+        Gaussian bandwidth for each observation.
+    """
+
+    # Convert the distance matrix into a floating-point array.
+    D2 = np.asarray(D2, dtype=float)
+
+    # Get the number of observations.
+    N = D2.shape[0]
+
+    # Validate the distance matrix.
+    if D2.ndim != 2 or D2.shape != (N, N):
+        raise ValueError("D2 must be a square matrix.")
+
+    if N < 2:
+        raise ValueError("At least two observations are required.")
+
+    if not np.isfinite(perplexity) or not 0 < perplexity <= N - 1:
+        raise ValueError("perplexity must be in the range (0, N-1].")
+
+    if not np.isfinite(tol) or tol < 0:
+        raise ValueError("tol must be non-negative and finite.")
+
+    if not isinstance(max_iter, (int, np.integer)) or max_iter < 0:
+        raise ValueError("max_iter must be a non-negative integer.")
+
+    # Allocate the conditional probability matrix and bandwidths.
+    P = np.zeros((N, N), dtype=float)
+    sigmas = np.empty(N, dtype=float)
+
+    # Target entropy in bits:
+    # H(P_i) = log2(perplexity)
+    target_entropy = np.log2(perplexity)
+
+    # Calibrate the bandwidth independently for every observation.
+    for i in range(N):
+
+        # Extract distances from observation i to all other points.
+        distances = D2[i].copy()
+
+        # Exclude the observation itself.
+        distances[i] = np.inf
+
+        # Identify valid neighbour distances.
+        valid = np.isfinite(distances)
+
+        if not np.any(valid):
+            raise ValueError("Each observation must have at least one finite neighbour.")
+
+        # Subtract the smallest distance for numerical stability.
+        # This ensures that at least one exponential remains equal to 1.
+        min_dist = np.min(distances[valid])
+
+        shifted_distances = distances - min_dist
+
+        # Initialize beta and its search bounds.
+        beta = 1.0
+        beta_min = 0.0
+        beta_max = np.inf
+
+        # -----------------------------------------
+        # Binary search for the target perplexity
+        # -----------------------------------------
+
+        for _ in range(max_iter):
+
+            # Compute Gaussian probabilities in exponential form.
+            exp_values = np.zeros(N, dtype=float)
+
+            exp_values[valid] = np.exp(
+                -beta * shifted_distances[valid]
+            )
+
+            # Normalize to obtain conditional probabilities.
+            p = exp_values / np.sum(exp_values)
+
+            # Calculate entropy in bits.
+            positive = p > 0
+
+            entropy = -np.sum(
+                p[positive] * np.log2(p[positive])
+            )
+
+            # Check whether the target entropy is reached.
+            if abs(entropy - target_entropy) < tol:
+                break
+
+            # If entropy is too high, increase beta.
+            # A larger beta produces a narrower distribution.
+            if entropy > target_entropy:
+
+                beta_min = beta
+
+                # No upper bound has been established yet.
+                if np.isinf(beta_max):
+                    beta *= 2.0
+
+                else:
+                    # Bisect between the established bounds.
+                    beta = 0.5 * (beta_min + beta_max)
+
+            else:
+
+                # Entropy is too low: decrease beta.
+                beta_max = beta
+
+                if beta_min == 0.0:
+                    beta *= 0.5
+
+                else:
+                    # Bisect between the established bounds.
+                    beta = 0.5 * (beta_min + beta_max)
+
+        # Recalculate probabilities using the final beta.
+        # This also handles max_iter=0 correctly.
+        exp_values = np.zeros(N, dtype=float)
+
+        exp_values[valid] = np.exp(
+            -beta * shifted_distances[valid]
+        )
+
+        P[i] = exp_values / np.sum(exp_values)
+
+        # Explicitly enforce a zero diagonal.
+        P[i, i] = 0.0
+
+        # Convert beta into the Gaussian bandwidth:
+        # beta = 1 / (2 * sigma_i^2)
+        sigmas[i] = np.sqrt(1.0 / (2.0 * beta))
+
+    return P, sigmas
+

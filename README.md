@@ -36,6 +36,7 @@ python scaffold.py
 - [x] **24.** kernel_pca
 - [x] **25.** lle
 - [x] **26.** laplacian_eigenmaps
+- [x] **27.** conditional_p
 
 ---
 
