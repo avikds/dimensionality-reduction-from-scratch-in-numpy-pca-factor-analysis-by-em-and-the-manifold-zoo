@@ -2782,3 +2782,137 @@ def kpca_transform(k_star, model):
     # learned Kernel PCA space.
     return K_centered @ coef
 
+# Step 25 - lle
+def lle(X, k=10, L=2, reg=1e-3):
+    """
+    Perform Locally Linear Embedding (LLE).
+
+    Parameters
+    ----------
+    X : ndarray of shape (N, D)
+        Input dataset, with one observation per row.
+
+    k : int, default=10
+        Number of nearest neighbours.
+
+    L : int, default=2
+        Number of embedding dimensions.
+
+    reg : float, default=1e-3
+        Regularization parameter for local reconstruction.
+
+    Returns
+    -------
+    Z : ndarray of shape (N, L)
+        Low-dimensional LLE embedding.
+
+    W : ndarray of shape (N, N)
+        Sparse reconstruction weight matrix.
+    """
+
+    # Convert input into a floating-point NumPy array.
+    X = np.asarray(X, dtype=float)
+
+    # Get the number of observations and features.
+    N, D = X.shape
+
+    # Validate input dimensions and parameters.
+    if X.ndim != 2 or N < 2:
+        raise ValueError("X must contain at least two observations.")
+
+    if not isinstance(k, (int, np.integer)) or not 1 <= k < N:
+        raise ValueError("k must be an integer between 1 and N - 1.")
+
+    if not isinstance(L, (int, np.integer)) or not 0 <= L < N:
+        raise ValueError("L must be an integer between 0 and N - 1.")
+
+    if not np.isfinite(reg) or reg < 0:
+        raise ValueError("reg must be non-negative and finite.")
+
+    # -------------------------------------------------
+    # Step 1: Find k nearest neighbours of every point.
+    # -------------------------------------------------
+
+    D2 = pairwise_sqdist(X)
+
+    idx = knn_indices(D2, k)
+
+    # -------------------------------------------------
+    # Step 2: Calculate local reconstruction weights.
+    # -------------------------------------------------
+
+    # Initialize the N x N reconstruction weight matrix.
+    W = np.zeros((N, N), dtype=float)
+
+    # Each observation is reconstructed independently
+    # from its k nearest neighbours.
+    for i in range(N):
+
+        # Get the indices of the neighbours of observation i.
+        neighbors = idx[i]
+
+        # Calculate neighbour difference vectors:
+        # A = X[neighbors] - X[i]
+        A = X[neighbors] - X[i]
+
+        # Construct the local covariance matrix:
+        # C = A @ A.T
+        C = A @ A.T
+
+        # Regularize the local covariance matrix.
+        # The trace-based regularization helps handle
+        # rank-deficient local neighbourhoods.
+        C += (
+            reg * np.trace(C) + 1e-12
+        ) * np.eye(k)
+
+        # Solve C @ w = 1.
+        # This is more numerically stable than explicitly
+        # calculating the inverse of C.
+        w = np.linalg.solve(C, np.ones(k))
+
+        # Normalize the weights so that they sum to one.
+        w /= np.sum(w)
+
+        # Store the weights in their corresponding positions.
+        W[i, neighbors] = w
+
+    # -------------------------------------------------
+    # Step 3: Construct the LLE optimization matrix.
+    # -------------------------------------------------
+
+    # Compute (I - W).
+    M = np.eye(N) - W
+
+    # Construct the symmetric matrix:
+    # M.T @ M = (I - W).T @ (I - W)
+    M = M.T @ M
+
+    # Remove small numerical asymmetries.
+    M = 0.5 * (M + M.T)
+
+    # -------------------------------------------------
+    # Step 4: Eigendecomposition.
+    # -------------------------------------------------
+
+    # Compute eigenvalues and eigenvectors.
+    # eigh returns eigenvalues in ascending order.
+    eigenvalues, eigenvectors = np.linalg.eigh(M)
+
+    # Skip the smallest eigenvector, which corresponds
+    # to the constant embedding direction.
+    #
+    # Select the next L eigenvectors.
+    Z = eigenvectors[:, 1:L + 1]
+
+    # -------------------------------------------------
+    # Step 5: Fix embedding signs.
+    # -------------------------------------------------
+
+    # Make the embedding deterministic by fixing
+    # the sign of each eigenvector.
+    Z = fix_signs(Z)
+
+    # Return the embedding and reconstruction weights.
+    return Z, W
+

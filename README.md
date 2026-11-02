@@ -34,6 +34,7 @@ python scaffold.py
 - [x] **22.** knn_geodesics
 - [x] **23.** isomap
 - [x] **24.** kernel_pca
+- [x] **25.** lle
 
 ---
 
