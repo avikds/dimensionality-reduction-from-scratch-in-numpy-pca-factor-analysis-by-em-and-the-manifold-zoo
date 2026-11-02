@@ -20,6 +20,7 @@ python scaffold.py
 - [x] **8.** ppca_logpdf
 - [x] **9.** ppca_posterior
 - [x] **10.** heldout_loglik_curve
+- [x] **11.** fa_e_step
 
 ---
 

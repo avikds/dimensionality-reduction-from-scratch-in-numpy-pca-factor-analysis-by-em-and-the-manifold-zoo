@@ -823,3 +823,91 @@ def heldout_loglik_curve(X_train, X_test, Ls):
         "best_L": best_L
     }
 
+# Step 11 - fa_e_step
+def fa_e_step(X, W, mu, psi):
+    """
+    Perform the E-step of the EM algorithm for Factor Analysis.
+
+    Parameters
+    ----------
+    X : ndarray of shape (N, D)
+        Input observations, with one observation per row.
+
+    W : ndarray of shape (D, L)
+        Factor loading matrix.
+
+    mu : ndarray of shape (D,)
+        Mean vector of the observed data.
+
+    psi : ndarray of shape (D,)
+        Diagonal entries of the noise covariance matrix.
+
+    Returns
+    -------
+    m : ndarray of shape (N, L)
+        Posterior means of the latent factors.
+
+    Sigma : ndarray of shape (L, L)
+        Shared posterior covariance matrix of the latent factors.
+    """
+
+    # Convert inputs into floating-point NumPy arrays.
+    X = np.asarray(X, dtype=float)
+    W = np.asarray(W, dtype=float)
+    mu = np.asarray(mu, dtype=float)
+    psi = np.asarray(psi, dtype=float)
+
+    # Validate input dimensions.
+    if X.ndim != 2 or W.ndim != 2:
+        raise ValueError("X and W must be two-dimensional arrays.")
+
+    N, D = X.shape
+    L = W.shape[1]
+
+    if W.shape[0] != D:
+        raise ValueError("W must have D rows.")
+
+    if mu.shape != (D,):
+        raise ValueError("mu must have shape (D,).")
+
+    if psi.shape != (D,):
+        raise ValueError("psi must have shape (D,).")
+
+    # Every feature-specific noise variance must be positive.
+    if np.any(psi <= 0) or not np.all(np.isfinite(psi)):
+        raise ValueError("All entries of psi must be positive and finite.")
+
+    # Center the observations.
+    Xc = X - mu
+
+    # Handle the special case of zero latent dimensions.
+    if L == 0:
+        m = np.empty((N, 0), dtype=float)
+        Sigma = np.empty((0, 0), dtype=float)
+        return m, Sigma
+
+    # Compute Psi^(-1) @ W efficiently.
+    # Since Psi is diagonal, divide each row of W by
+    # its corresponding noise variance.
+    weighted_W = W / psi[:, np.newaxis]
+
+    # Compute:
+    # M = I + W.T @ Psi^(-1) @ W
+    M = np.eye(L) + W.T @ weighted_W
+
+    # Compute the posterior covariance:
+    # Sigma = M^(-1)
+    #
+    # Use solve() instead of explicitly calculating the inverse.
+    Sigma = np.linalg.solve(M, np.eye(L))
+
+    # Compute the posterior means:
+    # m_i = Sigma @ W.T @ Psi^(-1) @ (x_i - mu)
+    #
+    # For row-oriented observations, this becomes:
+    # m = (X - mu) @ Psi^(-1) @ W @ Sigma
+    m = Xc @ weighted_W @ Sigma
+
+    # Return posterior means and shared posterior covariance.
+    return m, Sigma
+
