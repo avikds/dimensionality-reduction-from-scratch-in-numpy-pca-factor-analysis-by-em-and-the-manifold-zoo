@@ -2049,3 +2049,82 @@ def unroll_score(Z, U):
     # Return one Python float for each true manifold coordinate.
     return tuple(scores)
 
+# Step 20 - classical_mds
+def pairwise_sqdist(A, B=None):
+    A = np.asarray(A, dtype=float)
+    B = A if B is None else np.asarray(B, dtype=float)
+    d2 = (A ** 2).sum(axis=1)[:, None] + (B ** 2).sum(axis=1)[None, :] - 2.0 * A @ B.T
+    return np.clip(d2, 0.0, None)
+
+
+def classical_mds(D2, L):
+    """
+    Perform Classical Multidimensional Scaling (MDS)
+    using a matrix of squared pairwise distances.
+
+    Parameters
+    ----------
+    D2 : ndarray of shape (N, N)
+        Symmetric matrix of squared dissimilarities.
+
+    L : int
+        Number of embedding dimensions.
+
+    Returns
+    -------
+    Z : ndarray of shape (N, L)
+        Low-dimensional embedding.
+
+    lam : ndarray of shape (N,)
+        All eigenvalues in decreasing order.
+        Negative eigenvalues are not clipped.
+    """
+
+    # Convert the squared distance matrix into a float array.
+    D2 = np.asarray(D2, dtype=float)
+
+    # Get the number of observations.
+    N = D2.shape[0]
+
+    # Validate the input dimensions.
+    if D2.ndim != 2 or D2.shape[0] != D2.shape[1]:
+        raise ValueError("D2 must be a square matrix.")
+
+    if not isinstance(L, (int, np.integer)) or not 0 <= L <= N:
+        raise ValueError("L must be an integer between 0 and N.")
+
+    # Construct the centering matrix:
+    # H = I - (1/N) * 11.T
+    H = np.eye(N) - np.ones((N, N)) / N
+
+    # Double-center the squared distance matrix.
+    # K = -0.5 * H @ D2 @ H
+    K = -0.5 * H @ D2 @ H
+
+    # Ensure numerical symmetry before eigendecomposition.
+    K = 0.5 * (K + K.T)
+
+    # Eigendecompose the centered matrix.
+    # eigh is appropriate because K is symmetric.
+    eigenvalues, eigenvectors = np.linalg.eigh(K)
+
+    # Sort eigenvalues and corresponding eigenvectors
+    # in decreasing order.
+    order = np.argsort(eigenvalues)[::-1]
+
+    lam = eigenvalues[order]
+    eigenvectors = eigenvectors[:, order]
+
+    # Construct the embedding using the first L eigenvectors.
+    # Clip negative eigenvalues only for the square root.
+    # The returned lam remains unmodified.
+    scales = np.sqrt(np.maximum(lam[:L], 0.0))
+
+    Z = eigenvectors[:, :L] * scales[None, :]
+
+    # Fix the signs of the embedding coordinates.
+    Z = fix_signs(Z)
+
+    # Return the embedding and all original eigenvalues.
+    return Z, lam
+

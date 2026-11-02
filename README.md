@@ -29,6 +29,7 @@ python scaffold.py
 - [x] **17.** mppca_e_step
 - [x] **18.** fit_mppca
 - [x] **19.** swiss_roll
+- [x] **20.** classical_mds
 
 ---
 
