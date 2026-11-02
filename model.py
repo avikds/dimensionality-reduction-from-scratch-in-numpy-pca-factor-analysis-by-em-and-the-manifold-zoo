@@ -3648,3 +3648,184 @@ def fit_tsne(
     # Return the final embedding and KL-divergence history.
     return Z, trace
 
+# Step 30 - embedding_report
+def embedding_report(X, y, k=10, perplexity=30.0, n_iter=500, seed=0):
+    """
+    Compare six dimensionality-reduction methods on the same dataset.
+
+    Methods:
+        1. PCA
+        2. RBF Kernel PCA
+        3. Isomap
+        4. Locally Linear Embedding (LLE)
+        5. Laplacian Eigenmaps
+        6. t-SNE
+
+    Each embedding is evaluated using trustworthiness and
+    leave-one-out 5-NN classification accuracy.
+
+    Parameters
+    ----------
+    X : ndarray of shape (N, D)
+        Input dataset, with one observation per row.
+
+    y : ndarray of shape (N,)
+        Class labels.
+
+    k : int, default=10
+        Number of neighbours for manifold learning methods
+        and trustworthiness evaluation.
+
+    perplexity : float, default=30.0
+        Target perplexity for t-SNE.
+
+    n_iter : int, default=500
+        Number of t-SNE optimization iterations.
+
+    seed : int, default=0
+        Random seed for reproducibility.
+
+    Returns
+    -------
+    dict
+        A dictionary containing the trustworthiness and
+        5-NN accuracy for each embedding method.
+    """
+
+    # Convert inputs into NumPy arrays.
+    X = np.asarray(X, dtype=float)
+    y = np.asarray(y)
+
+    # Validate input dimensions.
+    if X.ndim != 2:
+        raise ValueError("X must be a two-dimensional array.")
+
+    N = X.shape[0]
+
+    if y.ndim != 1 or len(y) != N:
+        raise ValueError("y must contain one label per observation.")
+
+    if X.shape[1] < 1 or N < 6:
+        raise ValueError("X must have at least one feature and six observations.")
+
+    # -------------------------------------------------
+    # Step 1: Compute pairwise squared Euclidean distances.
+    # -------------------------------------------------
+
+    D2 = pairwise_sqdist(X)
+
+    # Calculate sigma2 as the median of all nonzero
+    # entries in the original squared distance matrix.
+    nonzero_distances = D2[D2 > 0]
+
+    if nonzero_distances.size == 0:
+        raise ValueError("X must contain at least two distinct observations.")
+
+    sigma2 = float(np.median(nonzero_distances))
+
+    # -------------------------------------------------
+    # Step 2: PCA embedding.
+    # -------------------------------------------------
+
+    # Use the principal component scores from SVD-based PCA.
+    Z_pca = pca_svd(X, 2)[3]
+
+    # -------------------------------------------------
+    # Step 3: RBF Kernel PCA embedding.
+    # -------------------------------------------------
+
+    # Construct the RBF kernel using the median squared distance.
+    K = rbf_kernel(X, X, sigma2)
+
+    # Fit Kernel PCA and extract the training embedding.
+    Z_kpca = kernel_pca(K, 2)["Z"]
+
+    # -------------------------------------------------
+    # Step 4: Isomap embedding.
+    # -------------------------------------------------
+
+    # Compute the Isomap embedding and retain the indices
+    # of points belonging to the largest connected component.
+    Z_isomap, keep, _ = isomap(X, k, 2)
+
+    # Restrict the original distance matrix and labels
+    # to the retained Isomap observations.
+    D2_isomap = D2[np.ix_(keep, keep)]
+    y_isomap = y[keep]
+
+    # -------------------------------------------------
+    # Step 5: Locally Linear Embedding.
+    # -------------------------------------------------
+
+    # Extract the LLE embedding.
+    Z_lle = lle(X, k, 2)[0]
+
+    # -------------------------------------------------
+    # Step 6: Laplacian Eigenmaps.
+    # -------------------------------------------------
+
+    # Use sqrt(sigma2) as the heat-kernel bandwidth.
+    Z_laplacian = laplacian_eigenmaps(
+        X,
+        k,
+        np.sqrt(sigma2),
+        2
+    )[0]
+
+    # -------------------------------------------------
+    # Step 7: t-SNE embedding.
+    # -------------------------------------------------
+
+    # Fit t-SNE using the requested perplexity and iterations.
+    Z_tsne = fit_tsne(
+        X,
+        perplexity=perplexity,
+        n_iter=n_iter,
+        seed=seed
+    )[0]
+
+    # -------------------------------------------------
+    # Step 8: Collect all embeddings.
+    # -------------------------------------------------
+
+    embeddings = {
+        "pca": Z_pca,
+        "kpca_rbf": Z_kpca,
+        "lle": Z_lle,
+        "laplacian": Z_laplacian,
+        "tsne": Z_tsne
+    }
+
+    # -------------------------------------------------
+    # Step 9: Evaluate the embeddings.
+    # -------------------------------------------------
+
+    report = {}
+
+    # Evaluate PCA, Kernel PCA, LLE, Laplacian Eigenmaps,
+    # and t-SNE using all original observations.
+    for name, Z in embeddings.items():
+
+        report[name] = {
+            "trust": float(
+                trustworthiness(D2, Z, k)
+            ),
+            "knn": float(
+                knn_accuracy(Z, y, 5)
+            )
+        }
+
+    # Evaluate Isomap separately because it may discard
+    # observations outside the largest connected component.
+    report["isomap"] = {
+        "trust": float(
+            trustworthiness(D2_isomap, Z_isomap, k)
+        ),
+        "knn": float(
+            knn_accuracy(Z_isomap, y_isomap, 5)
+        )
+    }
+
+    # Return the complete comparison report.
+    return report
+
