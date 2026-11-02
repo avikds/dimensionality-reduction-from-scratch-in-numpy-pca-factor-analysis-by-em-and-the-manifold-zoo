@@ -569,3 +569,100 @@ def ppca_fit(X, L):
     # Return the sample mean, loading matrix, and noise variance.
     return mu, W, float(sigma2)
 
+# Step 8 - ppca_logpdf
+def ppca_logpdf(X, mu, W, sigma2):
+    """
+    Compute the PPCA log-density for each observation.
+
+    Parameters
+    ----------
+    X : ndarray of shape (N, D)
+        Input observations, with one observation per row.
+
+    mu : ndarray of shape (D,)
+        Mean vector of the PPCA model.
+
+    W : ndarray of shape (D, L)
+        Loading matrix.
+
+    sigma2 : float
+        Positive isotropic noise variance.
+
+    Returns
+    -------
+    logpdf : ndarray of shape (N,)
+        Log probability density of each observation.
+    """
+
+    # Convert inputs into floating-point NumPy arrays.
+    X = np.asarray(X, dtype=float)
+    mu = np.asarray(mu, dtype=float)
+    W = np.asarray(W, dtype=float)
+
+    # Get the number of observations, features, and latent dimensions.
+    N, D = X.shape
+    L = W.shape[1]
+
+    # Validate input dimensions.
+    if X.ndim != 2 or W.ndim != 2:
+        raise ValueError("X and W must be two-dimensional arrays.")
+
+    if mu.shape != (D,) or W.shape[0] != D:
+        raise ValueError("Incompatible dimensions between X, mu, and W.")
+
+    # The noise variance must be strictly positive.
+    if not np.isscalar(sigma2) or not np.isfinite(sigma2) or sigma2 <= 0:
+        raise ValueError("sigma2 must be a positive finite scalar.")
+
+    sigma2 = float(sigma2)
+
+    # Center the observations using the model mean.
+    Xc = X - mu
+
+    # Construct the smaller L x L matrix:
+    # M = W.T @ W + sigma2 * I
+    M = W.T @ W + sigma2 * np.eye(L)
+
+    # Compute the log determinant of M.
+    # slogdet is more numerically stable than calculating det directly.
+    sign, logdet_M = np.linalg.slogdet(M)
+
+    if sign <= 0:
+        raise np.linalg.LinAlgError("Matrix M must have a positive determinant.")
+
+    # Apply the matrix determinant lemma:
+    # log|C| = (D - L) * log(sigma2) + log|M|
+    logdet_C = (D - L) * np.log(sigma2) + logdet_M
+
+    # Project centered observations into the latent space.
+    # A has shape (N, L).
+    A = Xc @ W
+
+    # Calculate the Mahalanobis distance using the
+    # Woodbury matrix identity, without constructing C.
+    #
+    # C^(-1) = (1 / sigma2) *
+    #          (I - W @ M^(-1) @ W.T)
+    #
+    # Solve M @ B = A.T instead of explicitly calculating M^(-1).
+    if L > 0:
+        B = np.linalg.solve(M, A.T).T
+
+        # Efficient quadratic form for every observation.
+        mahalanobis = (
+            np.sum(Xc ** 2, axis=1) - np.sum(A * B, axis=1)
+        ) / sigma2
+    else:
+        # Special case: no latent dimensions.
+        mahalanobis = np.sum(Xc ** 2, axis=1) / sigma2
+
+    # Calculate the Gaussian log-density.
+    logpdf = -0.5 * (
+        D * np.log(2.0 * np.pi)
+        + logdet_C
+        + mahalanobis
+    )
+
+    # Return one log-density value per observation.
+    return logpdf
+
