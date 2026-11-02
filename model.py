@@ -2597,3 +2597,188 @@ def short_circuit_count(D2, U, k, gap=15.0):
     # Return a Python integer.
     return int(count)
 
+# Step 24 - kernel_pca
+def fix_signs(W):
+    W = np.asarray(W, dtype=float)
+    rows = np.argmax(np.abs(W), axis=0)
+    flips = np.sign(W[rows, np.arange(W.shape[1])])
+    flips[flips == 0] = 1.0
+    return W * flips
+
+
+def pairwise_sqdist(A, B=None):
+    A = np.asarray(A, dtype=float)
+    B = A if B is None else np.asarray(B, dtype=float)
+
+    d2 = (
+        (A ** 2).sum(axis=1)[:, None]
+        + (B ** 2).sum(axis=1)[None, :]
+        - 2.0 * A @ B.T
+    )
+
+    return np.clip(d2, 0.0, None)
+
+
+def rbf_kernel(A, B, sigma2):
+    """
+    Compute the RBF (Gaussian) kernel between rows of A and B.
+    """
+    return np.exp(-pairwise_sqdist(A, B) / (2.0 * sigma2))
+
+
+def kernel_pca(K, L):
+    """
+    Perform Kernel PCA using a precomputed training Gram matrix.
+
+    Parameters
+    ----------
+    K : ndarray of shape (N, N)
+        Training kernel (Gram) matrix.
+
+    L : int
+        Number of kernel principal components.
+
+    Returns
+    -------
+    dict
+        {
+            "coef": kernel projection coefficients, shape (N, L),
+            "eigvals": all centered eigenvalues, shape (N,),
+            "Z": training embedding, shape (N, L),
+            "col_mean": training kernel column means, shape (N,),
+            "all_mean": overall training kernel mean, Python float
+        }
+    """
+
+    # Convert the kernel matrix into a floating-point NumPy array.
+    K = np.asarray(K, dtype=float)
+
+    # Get the number of training observations.
+    N = K.shape[0]
+
+    # Validate the input matrix.
+    if K.ndim != 2 or K.shape != (N, N):
+        raise ValueError("K must be a square Gram matrix.")
+
+    if not np.all(np.isfinite(K)):
+        raise ValueError("K must contain only finite values.")
+
+    if not isinstance(L, (int, np.integer)) or not 0 <= L <= N:
+        raise ValueError("L must be an integer between 0 and N.")
+
+    # Ensure numerical symmetry.
+    K = 0.5 * (K + K.T)
+
+    # Store the original training kernel centering statistics.
+    col_mean = K.mean(axis=0)
+    all_mean = float(K.mean())
+
+    # Construct the centering matrix.
+    H = np.eye(N) - np.ones((N, N)) / N
+
+    # Double-center the kernel matrix.
+    K_centered = H @ K @ H
+
+    # Ensure numerical symmetry after centering.
+    K_centered = 0.5 * (K_centered + K_centered.T)
+
+    # Eigendecompose the centered kernel matrix.
+    eigenvalues, eigenvectors = np.linalg.eigh(K_centered)
+
+    # Sort eigenvalues and eigenvectors in decreasing order.
+    order = np.argsort(eigenvalues)[::-1]
+
+    eigenvalues = eigenvalues[order]
+    eigenvectors = eigenvectors[:, order]
+
+    # Clip negative eigenvalues caused by numerical errors.
+    eigenvalues = np.maximum(eigenvalues, 0.0)
+
+    # Select the top L eigenvectors.
+    U_L = eigenvectors[:, :L]
+
+    # Fix eigenvector signs for reproducibility.
+    U_L = fix_signs(U_L)
+
+    # Calculate Lambda^(-1/2).
+    # Handle zero eigenvalues safely.
+    inv_sqrt = np.zeros(L, dtype=float)
+
+    positive = eigenvalues[:L] > 0.0
+
+    inv_sqrt[positive] = (
+        1.0 / np.sqrt(eigenvalues[:L][positive])
+    )
+
+    # Calculate the kernel PCA coefficients:
+    # coef = U_L @ Lambda_L^(-1/2)
+    coef = U_L * inv_sqrt[None, :]
+
+    # Calculate the training embedding.
+    Z = K_centered @ coef
+
+    # Return the fitted kernel PCA model.
+    return {
+        "coef": coef,
+        "eigvals": eigenvalues,
+        "Z": Z,
+        "col_mean": col_mean,
+        "all_mean": all_mean
+    }
+
+
+def kpca_transform(k_star, model):
+    """
+    Project new observations into an existing Kernel PCA space.
+
+    Parameters
+    ----------
+    k_star : ndarray of shape (M, N)
+        Kernel matrix between M new observations
+        and N training observations.
+
+    model : dict
+        Model returned by kernel_pca().
+
+    Returns
+    -------
+    ndarray of shape (M, L)
+        Kernel PCA embedding of the new observations.
+    """
+
+    # Convert the new-point kernel matrix into a float array.
+    k_star = np.asarray(k_star, dtype=float)
+
+    # Retrieve training centering statistics and coefficients.
+    coef = model["coef"]
+    col_mean = model["col_mean"]
+    all_mean = model["all_mean"]
+
+    # Validate dimensions.
+    if k_star.ndim != 2:
+        raise ValueError("k_star must be a two-dimensional array.")
+
+    if k_star.shape[1] != coef.shape[0]:
+        raise ValueError(
+            "k_star must have one column per training observation."
+        )
+
+    if col_mean.shape != (k_star.shape[1],):
+        raise ValueError("Invalid training column means.")
+
+    # Compute the mean kernel value for each new observation.
+    row_mean = k_star.mean(axis=1, keepdims=True)
+
+    # Center the new-point kernel matrix consistently
+    # with the original training kernel matrix.
+    K_centered = (
+        k_star
+        - row_mean
+        - col_mean[None, :]
+        + all_mean
+    )
+
+    # Project the centered kernel matrix into the
+    # learned Kernel PCA space.
+    return K_centered @ coef
+
