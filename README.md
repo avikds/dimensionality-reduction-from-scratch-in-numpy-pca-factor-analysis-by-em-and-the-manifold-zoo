@@ -27,6 +27,7 @@ python scaffold.py
 - [x] **15.** sensor_noise_experiment
 - [x] **16.** em_pca
 - [x] **17.** mppca_e_step
+- [x] **18.** fit_mppca
 
 ---
 

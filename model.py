@@ -1697,3 +1697,207 @@ def mppca_e_step(X, pi, mus, Ws, sigma2s):
     # Return responsibilities and mean log-likelihood.
     return resp, ll
 
+# Step 18 - fit_mppca
+def curved_data(n, seed=0):
+    rng = np.random.default_rng(seed)
+    x = rng.uniform(-2.0, 2.0, n)
+    y = np.sin(1.5 * x) + 0.05 * rng.standard_normal(n)
+    return np.column_stack([x + 0.05 * rng.standard_normal(n), y])
+
+
+def fit_mppca(X, K, L, n_iter=100, seed=0):
+    """
+    Fit a Mixture of Probabilistic PCA models using EM.
+
+    Parameters
+    ----------
+    X : ndarray of shape (N, D)
+        Input observations, with one example per row.
+
+    K : int
+        Number of mixture components.
+
+    L : int
+        Number of latent dimensions per component.
+
+    n_iter : int, default=100
+        Number of EM iterations.
+
+    seed : int, default=0
+        Random seed for reproducible initialization.
+
+    Returns
+    -------
+    pi : ndarray of shape (K,)
+        Mixture weights.
+
+    mus : ndarray of shape (K, D)
+        Component mean vectors.
+
+    Ws : ndarray of shape (K, D, L)
+        Component loading matrices.
+
+    sigma2s : ndarray of shape (K,)
+        Component noise variances.
+
+    trace : ndarray of shape (n_iter,)
+        Mean log-likelihood after each EM iteration.
+    """
+
+    # Convert input into a floating-point NumPy array.
+    X = np.asarray(X, dtype=float)
+
+    # Get the number of observations and features.
+    N, D = X.shape
+
+    # Validate input parameters.
+    if not isinstance(K, (int, np.integer)) or not 1 <= K <= N:
+        raise ValueError("K must be an integer between 1 and N.")
+
+    if not isinstance(L, (int, np.integer)) or not 0 <= L < D:
+        raise ValueError("L must be an integer between 0 and D - 1.")
+
+    if not isinstance(n_iter, (int, np.integer)) or n_iter < 1:
+        raise ValueError("n_iter must be a positive integer.")
+
+    # Initialize the random number generator.
+    rng = np.random.default_rng(seed)
+
+    # --------------------------------------------------
+    # 1. K-means initialization
+    # --------------------------------------------------
+
+    # Select K distinct observations as initial cluster centers.
+    centers = X[rng.choice(N, K, replace=False)].copy()
+
+    # Perform exactly five rounds of K-means.
+    for _ in range(5):
+
+        # Compute squared Euclidean distances from every
+        # observation to every cluster center.
+        distances = np.sum(
+            (X[:, None, :] - centers[None, :, :]) ** 2,
+            axis=2
+        )
+
+        # Assign each observation to its nearest center.
+        labels = np.argmin(distances, axis=1)
+
+        # Update each cluster center.
+        for k in range(K):
+
+            # Find observations assigned to cluster k.
+            cluster_points = X[labels == k]
+
+            # Replace the center with the cluster mean.
+            # Keep the old center if the cluster is empty.
+            if len(cluster_points) > 0:
+                centers[k] = np.mean(cluster_points, axis=0)
+
+    # Assign observations once more using the final centers.
+    distances = np.sum(
+        (X[:, None, :] - centers[None, :, :]) ** 2,
+        axis=2
+    )
+
+    labels = np.argmin(distances, axis=1)
+
+    # Construct one-hot initial responsibilities.
+    resp = np.zeros((N, K), dtype=float)
+    resp[np.arange(N), labels] = 1.0
+
+    # --------------------------------------------------
+    # 2. Allocate model parameters
+    # --------------------------------------------------
+
+    pi = np.empty(K, dtype=float)
+    mus = np.empty((K, D), dtype=float)
+    Ws = np.empty((K, D, L), dtype=float)
+    sigma2s = np.empty(K, dtype=float)
+
+    # Store the mean log-likelihood at each iteration.
+    trace = np.empty(n_iter, dtype=float)
+
+    # --------------------------------------------------
+    # 3. EM algorithm
+    # --------------------------------------------------
+
+    for iteration in range(n_iter):
+
+        # ==============================================
+        # M-step: Update mixture and PPCA parameters
+        # ==============================================
+
+        # Calculate effective component sample counts.
+        # The floor protects against empty components.
+        Nk = np.maximum(
+            np.sum(resp, axis=0),
+            1e-10
+        )
+
+        # Update mixture weights.
+        pi = Nk / N
+
+        # Calculate responsibility-weighted component means.
+        mus = (resp.T @ X) / Nk[:, None]
+
+        # Fit a separate PPCA model to each component.
+        for k in range(K):
+
+            # Center observations around component k's mean.
+            Xc = X - mus[k]
+
+            # Calculate the weighted empirical covariance.
+            # S_k = sum_n r_nk (x_n-mu_k)(x_n-mu_k).T / Nk
+            S = (
+                Xc.T @ (resp[:, k, None] * Xc)
+            ) / Nk[k]
+
+            # Ensure numerical symmetry.
+            S = 0.5 * (S + S.T)
+
+            # Eigendecompose the D x D covariance matrix.
+            eigenvalues, eigenvectors = np.linalg.eigh(S)
+
+            # Sort eigenvalues and eigenvectors in decreasing order.
+            order = np.argsort(eigenvalues)[::-1]
+
+            eigenvalues = np.maximum(eigenvalues[order], 0.0)
+            eigenvectors = eigenvectors[:, order]
+
+            # Estimate the isotropic noise variance from
+            # the discarded eigenvalues.
+            sigma2s[k] = max(
+                float(np.mean(eigenvalues[L:])),
+                1e-6
+            )
+
+            # Calculate the loading matrix:
+            # W_k = U_L @ sqrt(Lambda_L - sigma2 * I)
+            scales = np.sqrt(
+                np.maximum(
+                    eigenvalues[:L] - sigma2s[k],
+                    0.0
+                )
+            )
+
+            Ws[k] = eigenvectors[:, :L] * scales[None, :]
+
+        # ==============================================
+        # E-step: Update responsibilities
+        # ==============================================
+
+        resp, ll = mppca_e_step(
+            X,
+            pi,
+            mus,
+            Ws,
+            sigma2s
+        )
+
+        # Record the mean log-likelihood.
+        trace[iteration] = ll
+
+    # Return the fitted mixture model and likelihood trace.
+    return pi, mus, Ws, sigma2s, trace
+
